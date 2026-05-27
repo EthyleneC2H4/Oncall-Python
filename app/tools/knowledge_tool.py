@@ -337,11 +337,25 @@ def _rrf_merge_three(
 
 
 def format_docs(docs: List[Document]) -> str:
-    """格式化文档列表为上下文文本"""
-    formatted_parts = []
+    """格式化文档列表为上下文文本
 
-    for i, doc in enumerate(docs, 1):
+    Parent-Child 策略：
+    - 如果 metadata 中有 parent_content，使用 parent 内容（更完整的上下文）
+    - 按 parent_id 去重，同一 parent 只输出一次
+    """
+    formatted_parts = []
+    seen_parents: set[str] = set()
+
+    for doc in docs:
         metadata = doc.metadata
+        parent_id = metadata.get("parent_id", "")
+
+        # 按 parent_id 去重：同一个 parent 章节只输出一次
+        if parent_id and parent_id in seen_parents:
+            continue
+        if parent_id:
+            seen_parents.add(parent_id)
+
         source = metadata.get("_file_name", "未知来源")
 
         headers = []
@@ -351,17 +365,32 @@ def format_docs(docs: List[Document]) -> str:
 
         header_str = " > ".join(headers) if headers else ""
 
-        formatted = f"【参考资料 {i}】"
+        idx = len(formatted_parts) + 1
+        formatted = f"【参考资料 {idx}】"
         if header_str:
             formatted += f"\n标题: {header_str}"
         formatted += f"\n来源: {source}"
+
+        # chunk 类型标注
+        chunk_type = metadata.get("chunk_type", "")
+        if chunk_type and chunk_type != "general":
+            type_label = {
+                "procedure": "排查步骤",
+                "root_cause": "原因分析",
+                "action": "处置方案",
+                "alert_info": "告警信息",
+                "verification": "验证步骤",
+            }.get(chunk_type, chunk_type)
+            formatted += f"\n类型: {type_label}"
 
         # 如果有 rerank 分数，展示
         rerank_score = metadata.get("rerank_score")
         if rerank_score is not None:
             formatted += f"\n相关度: {rerank_score:.4f}"
 
-        formatted += f"\n内容:\n{doc.page_content}\n"
+        # Parent-Child: 优先使用 parent_content（完整章节上下文）
+        content = metadata.get("parent_content", "") or doc.page_content
+        formatted += f"\n内容:\n{content}\n"
 
         formatted_parts.append(formatted)
 

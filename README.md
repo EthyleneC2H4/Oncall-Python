@@ -8,18 +8,25 @@
 
 ## ✨ 核心特性
 
-- 🤖 **智能对话** - LangChain 多轮对话 + 流式输出
-- 📚 **RAG 问答** - 向量检索增强，支持文档上传、自动建立向量索引、自动更新知识库
-- 🔧 **AIOps 诊断** - Plan-Execute-Replan 自动故障诊断和根因分析
-- 🌐 **Web 界面** - 现代化 UI，支持多种对话模式：快速问答/流式对话
-- 🔌 **MCP 集成** - 日志查询和监控数据工具接入
+- 🤖 **智能对话** — LangChain 多轮对话 + 流式输出 + 上下文自动压缩
+- 📚 **全链路 RAG** — Query Rewrite → 向量 + BM25 双路召回 → RRF 融合 → Rerank 精排 + 结构感知 Parent-Child 分块
+- 🔧 **AIOps 诊断** — Plan-Execute-Replan 自主诊断工作流 + Harness 诊断规则约束
+- 🧠 **知识图谱** — 运维领域知识图谱，支持告警根因分析、级联预测、LLM 自动三元组抽取
+- 👥 **多 Agent 并行** — Coordinator-Specialist-Synthesizer 架构，日志/指标/知识三维度并行诊断
+- 🎯 **查询意图路由** — 4 类意图智能分类，自动匹配最优检索策略
+- 📊 **评测与反馈** — 端到端评测框架 + 用户反馈闭环 + 知识图谱自进化
+- 🔌 **MCP 集成** — 标准化工具协议接入日志查询和监控指标
 
 ## 🛠️ 技术栈
 
 - **框架**: FastAPI + LangChain + LangGraph
-- **LLM**: 阿里云 DashScope (通义千问)
-- **向量库**: Milvus
+- **LLM**: 阿里云 DashScope (Qwen-Max)
+- **向量库**: Milvus (IVF_FLAT / L2)
+- **稀疏检索**: BM25 (rank_bm25 + jieba)
+- **重排**: DashScope gte-rerank (Cross-Encoder)
+- **知识图谱**: NetworkX (DiGraph)
 - **工具协议**: MCP (Model Context Protocol)
+- **前端**: 原生 HTML/CSS/JS + vis-network (图谱可视化)
 
 ## 🚀 快速开始
 
@@ -135,9 +142,17 @@ python -c "import requests, os, time; [requests.post('http://localhost:9900/api/
 |------|------|------|------|
 | 普通对话 | POST | `/api/chat` | 一次性返回 |
 | 流式对话 | POST | `/api/chat_stream` | SSE 流式输出 |
-| AIOps 诊断 | POST | `/api/aiops` | 自动故障诊断（流式） |
+| AIOps 诊断 | POST | `/api/aiops` | Plan-Execute-Replan 自动诊断 (SSE) |
+| 多 Agent 诊断 | POST | `/api/multi-diagnose` | 三 Agent 并行诊断 (SSE) |
+| KG 根因分析 | GET | `/api/kg/analyze/{keyword}` | 告警根因 + 处置方案 |
+| KG 级联预测 | GET | `/api/kg/cascade/{keyword}` | BFS 级联风险预测 |
+| KG 图谱数据 | GET | `/api/kg/graph` | 完整图谱 (vis-network) |
+| KG 三元组抽取 | POST | `/api/kg/extract` | 从文档自动抽取三元组 |
+| KG 事件学习 | POST | `/api/kg/learn-incident` | 从故障事件增量学习 |
+| 用户反馈 | POST | `/api/feedback` | 提交反馈 (负反馈自动学习到 KG) |
+| 评测运行 | POST | `/api/eval/run` | 端到端评测 (5 场景 × 4 维度) |
 | 文件上传 | POST | `/api/upload` | 上传并索引文档 |
-| 健康检查 | GET | `/api/health` | 服务状态检查 |
+| 健康检查 | GET | `/health` | 服务状态检查 |
 
 ### 使用示例
 
@@ -163,75 +178,75 @@ curl -X POST "http://localhost:9900/api/aiops" \
 ## 📁 项目结构
 
 ```
-super_biz_agent_py/
-├── app/                                    # 应用核心
-│   ├── __init__.py                         # 包初始化（自动加载日志配置）
-│   ├── main.py                             # FastAPI 应用入口
-│   ├── config.py                           # 配置管理（环境变量、MCP 服务器配置）
-│   ├── api/                                # API 路由层
-│   │   ├── __init__.py
-│   │   ├── chat.py                         # 对话接口（RAG 聊天）
-│   │   ├── aiops.py                        # AIOps 接口（故障诊断）
-│   │   ├── file.py                         # 文件管理（文档上传）
-│   │   └── health.py                       # 健康检查（服务状态）
-│   ├── services/                           # 业务服务层
-│   │   ├── __init__.py
-│   │   ├── rag_agent_service.py            # RAG Agent（LangGraph 状态图）
-│   │   ├── aiops_service.py                # AIOps 服务（计划-执行-重规划）
-│   │   ├── vector_store_manager.py         # 向量存储管理器
-│   │   ├── vector_embedding_service.py     # 向量embedding服务
-│   │   ├── vector_index_service.py         # 向量索引服务
-│   │   ├── vector_search_service.py        # 向量检索服务
-│   │   └── document_splitter_service.py    # 文档分割服务
+Oncall-Python/
+├── app/                                    # 核心应用
+│   ├── main.py                             # FastAPI 入口 + 生命周期管理
+│   ├── config.py                           # Pydantic Settings 配置管理
+│   ├── api/                                # REST API 路由层
+│   │   ├── chat.py                         #   对话接口（快速/流式）
+│   │   ├── aiops.py                        #   AIOps 诊断接口 (SSE)
+│   │   ├── kg.py                           #   知识图谱接口（分析/级联/抽取/学习）
+│   │   ├── multi_diag.py                   #   多 Agent 并行诊断接口
+│   │   ├── feedback.py                     #   反馈收集 + 评测运行接口
+│   │   ├── file.py                         #   文件上传 + 知识库索引接口
+│   │   └── health.py                       #   健康检查接口
+│   ├── services/                           # 业务逻辑层
+│   │   ├── rag_agent_service.py            #   RAG Agent（LangGraph + 五层结构化提示词）
+│   │   ├── aiops_service.py                #   AIOps 工作流编排（Plan-Execute-Replan）
+│   │   ├── knowledge_graph_service.py      #   运维知识图谱（NetworkX）
+│   │   ├── kg_extractor.py                 #   LLM 自动三元组抽取
+│   │   ├── query_router.py                 #   查询意图分类与路由（4 类意图）
+│   │   ├── query_rewriter.py               #   LLM 查询改写（口语化→规范化）
+│   │   ├── bm25_retriever.py               #   BM25 稀疏检索（jieba + rank_bm25）
+│   │   ├── reranker.py                     #   Rerank 精排（DashScope gte-rerank）
+│   │   ├── context_assembler.py            #   动态上下文组装（Token 优先级）
+│   │   ├── document_splitter_service.py    #   结构感知分块 + Parent-Child 双层索引
+│   │   ├── vector_store_manager.py         #   Milvus 向量存储管理
+│   │   ├── vector_embedding_service.py     #   DashScope 嵌入服务
+│   │   ├── vector_index_service.py         #   文档索引服务
+│   │   └── vector_search_service.py        #   语义搜索服务
 │   ├── agent/                              # Agent 模块
-│   │   ├── __init__.py
-│   │   ├── mcp_client.py                   # MCP 客户端（工具调用）
-│   │   └── aiops/                          # AIOps 核心逻辑
-│   │       ├── __init__.py
-│   │       ├── planner.py                  # 计划制定器
-│   │       ├── executor.py                 # 步骤执行器
-│   │       ├── replanner.py                # 重规划器
-│   │       ├── state.py                    # 状态定义
-│   │       └── utils.py                    # 工具函数
-│   ├── models/                             # 数据模型层
-│   │   ├── __init__.py
-│   │   ├── aiops.py                        # AIOps 模型
-│   │   ├── document.py                     # 文档模型
-│   │   ├── request.py                      # 请求模型
-│   │   └── response.py                     # 响应模型
-│   ├── tools/                              # Agent 工具集
-│   │   ├── __init__.py
-│   │   ├── knowledge_tool.py               # 知识库查询工具
-│   │   └── time_tool.py                    # 时间工具
+│   │   ├── mcp_client.py                   #   MCP 客户端（带重试拦截器）
+│   │   ├── aiops/                          #   AIOps Agent（Plan-Execute-Replan）
+│   │   │   ├── state.py                    #     状态定义（含诊断事件流）
+│   │   │   ├── planner.py                  #     规划器（路由 + KG + 增强检索 + 上下文组装）
+│   │   │   ├── executor.py                 #     执行器（工具调用 + Agent Rules）
+│   │   │   ├── replanner.py                #     重规划器（continue/replan/respond）
+│   │   │   └── utils.py                    #     工具函数
+│   │   └── multi/                          #   多 Agent 并行诊断
+│   │       ├── coordinator.py              #     Coordinator 调度器
+│   │       ├── specialists.py              #     3 个专业 Agent（日志/指标/知识）
+│   │       └── synthesizer.py              #     Synthesizer 交叉验证
+│   ├── tools/                              # Agent 工具
+│   │   ├── knowledge_tool.py               #   知识检索（Rewrite + 向量 + BM25 + RRF + Rerank）
+│   │   ├── kg_tool.py                      #   知识图谱查询工具
+│   │   └── time_tool.py                    #   时间工具
+│   ├── models/                             # 数据模型
+│   │   ├── aiops.py                        #   AIOps 请求/响应模型
+│   │   ├── diagnosis_report.py             #   结构化诊断报告 + 事件流 + 反馈模型
+│   │   ├── document.py                     #   文档模型
+│   │   ├── request.py                      #   请求模型
+│   │   └── response.py                     #   响应模型
+│   ├── harness/                            # Harness 约束层
+│   │   └── agent_rules.py                  #   运维诊断规则库（10 通用 + 10 专项）
+│   ├── eval/                               # 评测模块
+│   │   └── evaluator.py                    #   端到端评测框架（5 场景 × 4 维度）
 │   ├── core/                               # 核心组件
-│   │   ├── __init__.py
-│   │   ├── llm_factory.py                  # LLM 工厂（模型管理）
-│   │   └── milvus_client.py                # Milvus 客户端
-│   └── utils/                              # 工具类
-│       ├── __init__.py
-│       └── logger.py                       # 日志配置（Loguru）
-├── static/                                 # Web 前端（纯静态）
-│   ├── index.html                          # 主页面
-│   ├── app.js                              # 前端逻辑
-│   └── styles.css                          # 样式表
-├── mcp_servers/                            # MCP 服务器
-│   ├── cls_server.py                       # CLS 日志查询服务
-│   ├── monitor_server.py                   # 监控数据服务
-│   └── README.md                           # MCP 服务说明
-├── aiops-docs/                             # 运维知识库（Markdown 文档）
-├── logs/                                   # 日志目录（Loguru 自动创建）
-│   └── app_YYYY-MM-DD.log                  # 按天轮转的日志文件
-├── uploads/                                # 上传文件临时目录
-├── volumes/                                # Milvus 数据持久化目录
-├── .env                                    # 环境变量配置（需手动创建）
-├── Makefile                                # 项目管理命令（Linux/macOS）
-├── start-windows.bat                       # Windows 启动脚本
-├── stop-windows.bat                        # Windows 停止脚本
-├── vector-database.yml                     # Milvus Docker Compose 配置
-├── pyproject.toml                          # 项目配置（依赖、元数据）
-├── uv.lock                                 # uv 依赖锁定文件
-├── pyrightconfig.json                      # Pyright 类型检查配置
-└── README.md                               # 项目说明
+│   │   ├── llm_factory.py                  #   LLM 模型工厂
+│   │   └── milvus_client.py                #   Milvus 客户端管理器
+│   └── utils/
+│       └── logger.py                       #   日志配置
+├── mcp_servers/                            # MCP 外部工具服务器
+│   ├── cls_server.py                       #   腾讯云日志查询 MCP Server
+│   └── monitor_server.py                   #   监控指标查询 MCP Server
+├── static/                                 # 前端静态文件
+│   ├── index.html                          #   单页应用 HTML
+│   ├── app.js                              #   前端逻辑（含 KG 可视化 + 反馈按钮）
+│   └── styles.css                          #   样式
+├── aiops-docs/                             # 运维知识库文档
+├── vector-database.yml                     # Milvus Docker Compose
+├── pyproject.toml                          # 项目配置 + 依赖
+└── .env                                    # 环境变量
 ```
 
 ## ⚙️ 配置说明
@@ -259,33 +274,23 @@ CHUNK_OVERLAP=100
 
 基于 **Plan-Execute-Replan** 模式实现自动故障诊断。
 
-### 核心特性
-- ✅ 自动制定诊断计划（Planner）
-- ✅ 智能工具调用（Executor）
-- ✅ 动态调整步骤（Replanner）
-- ✅ 流式输出诊断过程
-- ✅ 生成结构化报告
+### 两种诊断模式
 
-### 快速测试
-
-```bash
-# 服务已通过 make init 自动启动
-# 如需重启服务：make restart
-
-# 访问 Web 界面，点击"智能运维与诊断工具"
-# 或使用 API
-curl -X POST "http://localhost:9900/api/aiops" \
-  -H "Content-Type: application/json" \
-  -d '{"session_id":"test"}' \
-  --no-buffer
+**模式 1: Plan-Execute-Replan** (`POST /api/aiops`)
+```
+查询路由 → Planner（意图分类 + KG查询 + 增强检索 → 生成计划）
+         → Executor（逐步执行，调用 MCP 工具，遵循 Harness 诊断规则）
+         → Replanner（评估：继续 / 调整计划 / 生成报告）
+         → SSE 流式推送诊断过程 + 结构化报告
 ```
 
-### 诊断流程
+**模式 2: 多 Agent 并行诊断** (`POST /api/multi-diagnose`)
 ```
-1. Planner 制定计划 → 生成 4-6 个诊断步骤
-2. Executor 执行步骤 → 调用 MCP 工具（日志查询、监控数据）
-3. Replanner 评估结果 → 决定继续/调整/生成报告
-4. 输出诊断报告 → 根因分析 + 运维建议
+Coordinator（分析告警，并行分发）
+    ├→ LogAnalystAgent（MCP:CLS 日志分析）
+    ├→ MetricInspectorAgent（MCP:Monitor 指标分析）
+    └→ KnowledgeRetrieverAgent（KG + RAG 知识检索）
+→ Synthesizer（交叉验证 → 根因定位 → 结构化报告）
 ```
 
 ## 📝 开发指南
