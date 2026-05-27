@@ -30,6 +30,7 @@ from app.agent.multi.specialists import (
     MetricInspectorAgent,
 )
 from app.agent.multi.synthesizer import Synthesizer
+from app.core.degradation import DegradationLevel
 
 
 class AgentFinding(BaseModel):
@@ -49,6 +50,7 @@ class DiagnosisResult(BaseModel):
     total_duration_ms: float
     agents_succeeded: int
     agents_failed: int
+    degradation_level: str = DegradationLevel.NONE.value
 
 
 async def run_parallel_diagnosis(alert_input: str) -> DiagnosisResult:
@@ -102,6 +104,59 @@ async def run_parallel_diagnosis(alert_input: str) -> DiagnosisResult:
 
     logger.info(f"=== 多 Agent 诊断完成，耗时 {total_ms:.0f}ms ===")
     return result
+
+
+async def run_diagnosis_with_degradation(alert_input: str) -> DiagnosisResult:
+    """带降级的诊断入口
+
+    Level 0: 多 Agent 并行 (≥2 Agent 成功)
+    Level 1: 多 Agent 部分成功 (仅 1 Agent 成功)
+    Level 2: 直接 RAG 检索兜底
+
+    Args:
+        alert_input: 告警描述
+
+    Returns:
+        DiagnosisResult (含 degradation_level)
+    """
+    try:
+        result = await asyncio.wait_for(
+            run_parallel_diagnosis(alert_input),
+            timeout=120,  # 2 分钟上限
+        )
+        if result.agents_succeeded >= 2:
+            return result  # 正常
+
+        # 仅 1 个 Agent 成功，标记降级
+        result.degradation_level = DegradationLevel.SINGLE_AGENT.value
+        logger.warning(
+            f"多 Agent 仅 {result.agents_succeeded} 个成功，标记为降级"
+        )
+        return result
+
+    except asyncio.TimeoutError:
+        logger.error("多 Agent 诊断超时 (120s)")
+    except Exception as e:
+        logger.error(f"多 Agent 诊断异常: {e}")
+
+    # 降级兜底：使用 RAG 检索
+    from app.tools.knowledge_tool import retrieve_with_degradation
+    try:
+        ctx, docs, deg_level = await retrieve_with_degradation(alert_input)
+        report = f"# 降级诊断结果\n\n多 Agent 诊断不可用，以下为 RAG 检索结果：\n\n{ctx}"
+    except Exception:
+        report = "诊断服务暂时不可用，请稍后重试。"
+        deg_level = DegradationLevel.TEMPLATE
+
+    return DiagnosisResult(
+        alert_input=alert_input,
+        agent_findings=[],
+        synthesized_report=report,
+        total_duration_ms=0.0,
+        agents_succeeded=0,
+        agents_failed=0,
+        degradation_level=deg_level.value if hasattr(deg_level, 'value') else str(deg_level),
+    )
 
 
 async def _run_agent_safe(agent: Any, alert_input: str) -> AgentFinding:

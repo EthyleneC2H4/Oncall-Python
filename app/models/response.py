@@ -36,3 +36,7 @@ class HealthResponse(BaseModel):
     status: str = Field(..., description="状态")
     service: str = Field(..., description="服务名称")
     version: str = Field(..., description="版本号")
+
+
+# 从 core.degradation 重导出，供 API 层使用
+from app.core.degradation import DegradationInfo as DegradationInfo  # noqa: E402, F401

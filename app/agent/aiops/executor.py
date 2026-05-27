@@ -1,8 +1,9 @@
 """
 Executor 节点：执行单个步骤
-基于 LangGraph 官方教程实现
+基于 LangGraph 官方教程实现，增加单步超时控制
 """
 
+import asyncio
 from typing import Dict, Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_qwq import ChatQwen
@@ -35,7 +36,8 @@ async def executor(state: PlanExecuteState) -> Dict[str, Any]:
     task = plan[0]
     logger.info(f"当前任务: {task}")
 
-    try:
+    async def _execute_step():
+        """内部执行逻辑，被超时包装"""
         # 获取本地工具（含知识图谱工具）
         local_tools = [
             get_current_time,
@@ -49,10 +51,8 @@ async def executor(state: PlanExecuteState) -> Dict[str, Any]:
         mcp_tools = await mcp_client.get_tools()
         logger.info(f"可用工具数量: 本地 {len(local_tools)} + MCP {len(mcp_tools)}")
 
-        # 合并所有工具
         all_tools = local_tools + mcp_tools
 
-        # 创建 LLM（绑定工具）
         llm = ChatQwen(
             model=config.rag_model,
             api_key=config.dashscope_api_key,
@@ -60,10 +60,8 @@ async def executor(state: PlanExecuteState) -> Dict[str, Any]:
         )
         llm_with_tools = llm.bind_tools(all_tools)
 
-        # 创建工具节点（自动执行工具调用）
         tool_node = ToolNode(all_tools)
 
-        # 构建消息（只包含当前步骤，避免原始任务干扰）
         messages = [
             SystemMessage(content=f"""你是一个能力强大的助手，负责执行具体的任务步骤。
 
@@ -83,33 +81,39 @@ async def executor(state: PlanExecuteState) -> Dict[str, Any]:
             HumanMessage(content=f"请执行以下任务: {task}")
         ]
 
-        # 第一步：LLM 决定是否调用工具
         llm_response = await llm_with_tools.ainvoke(messages)
         logger.info(f"LLM 响应类型: {type(llm_response)}")
 
-        # 第二步：如果有工具调用，执行工具
         if hasattr(llm_response, "tool_calls") and llm_response.tool_calls:
             logger.info(f"检测到 {len(llm_response.tool_calls)} 个工具调用")
-            
-            # 使用 ToolNode 自动执行工具
+
             messages.append(llm_response)
             tool_messages = await tool_node.ainvoke({"messages": messages})
-            
-            # 第三步：将工具结果返回给 LLM 生成最终答案
+
             messages.extend(tool_messages["messages"])
             final_response = await llm_with_tools.ainvoke(messages)
-            result = final_response.content if hasattr(final_response, 'content') else str(final_response)
+            return final_response.content if hasattr(final_response, 'content') else str(final_response)
         else:
-            # 没有工具调用，直接使用 LLM 的输出
             logger.info("LLM 未调用工具，直接返回结果")
-            result = llm_response.content if hasattr(llm_response, 'content') else str(llm_response)
+            return llm_response.content if hasattr(llm_response, 'content') else str(llm_response)
 
+    # 带超时的步骤执行
+    step_timeout = config.step_timeout_seconds
+    try:
+        result = await asyncio.wait_for(_execute_step(), timeout=step_timeout)
         logger.info(f"步骤执行完成，结果长度: {len(result)}")
 
-        # 返回更新：移除已执行的步骤，添加执行历史
         return {
-            "plan": plan[1:],  # 移除第一个步骤
-            "past_steps": [(task, result)],  # 使用 operator.add 追加
+            "plan": plan[1:],
+            "past_steps": [(task, result)],
+        }
+
+    except asyncio.TimeoutError:
+        logger.warning(f"步骤执行超时 ({step_timeout}s): {task}")
+        return {
+            "plan": plan[1:],
+            "past_steps": [(task, f"步骤执行超时（{step_timeout}s）")],
+            "error_context": [{"step": task, "error_type": "timeout", "error_msg": f"超时 {step_timeout}s"}],
         }
 
     except Exception as e:
@@ -117,4 +121,5 @@ async def executor(state: PlanExecuteState) -> Dict[str, Any]:
         return {
             "plan": plan[1:],
             "past_steps": [(task, f"执行失败: {str(e)}")],
+            "error_context": [{"step": task, "error_type": "exception", "error_msg": str(e)}],
         }

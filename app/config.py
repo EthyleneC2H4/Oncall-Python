@@ -49,6 +49,17 @@ class Settings(BaseSettings):
     mcp_monitor_transport: str = "streamable-http"
     mcp_monitor_url: str = "http://localhost:8004/mcp"
 
+    # 降级策略配置
+    llm_backup_model: str = "qwen-plus"
+    llm_timeout_default: float = 30.0       # LLM 默认超时（秒）
+    llm_timeout_simple: float = 10.0        # 简单任务超时（改写/路由）
+    llm_timeout_complex: float = 30.0       # 复杂任务超时（规划/报告）
+    circuit_failure_threshold: int = 5      # 熔断触发的连续失败次数
+    circuit_cooldown_seconds: float = 60.0  # 熔断冷却时间（秒）
+    health_probe_interval: float = 30.0     # 健康探针间隔（秒）
+    step_timeout_seconds: float = 60.0      # Agent 单步超时（秒）
+    workflow_timeout_seconds: float = 180.0 # Agent 整体工作流超时（秒）
+
     @property
     def mcp_servers(self) -> Dict[str, Dict[str, Any]]:
         """获取完整的 MCP 服务器配置"""

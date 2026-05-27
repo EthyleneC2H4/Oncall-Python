@@ -20,6 +20,9 @@ from app.services.vector_store_manager import vector_store_manager
 from app.services.bm25_retriever import bm25_retriever
 from app.services.reranker import reranker
 from app.services.query_rewriter import query_rewriter
+from app.core.health_registry import health_registry
+from app.core.degradation import DegradationLevel
+from app.core.cache import retrieval_cache, make_cache_key
 
 
 @tool(response_format="content_and_artifact")
@@ -334,6 +337,101 @@ def _rrf_merge_three(
     sorted_docs = sorted(doc_scores.values(), key=lambda x: x[0], reverse=True)
 
     return [doc for _, doc in sorted_docs[:top_k]]
+
+
+async def retrieve_with_degradation(
+    query: str,
+    top_k: int | None = None,
+) -> tuple[str, List[Document], DegradationLevel]:
+    """按降级层级检索，逐级降级直到获得结果
+
+    Level 0: 完整链路 (向量+BM25+RRF+Rerank)
+    Level 1: 无 Rerank (向量+BM25+RRF)
+    Level 2: BM25-only (带改写)
+    Level 3: BM25-only (原始查询)
+    Level 4: 缓存
+    Level 5: 静态兜底
+
+    Returns:
+        (格式化上下文, 原始文档列表, 降级等级)
+    """
+    if top_k is None:
+        top_k = config.rag_top_k
+
+    # 检查缓存
+    cache_key = make_cache_key("retrieval", query, str(top_k))
+    cached = retrieval_cache.get(cache_key)
+    if cached is not None:
+        ctx, docs = cached
+        return ctx, docs, DegradationLevel.CACHED
+
+    milvus_ok = health_registry.is_available("milvus") and health_registry.is_available("dashscope_embedding")
+    rerank_ok = health_registry.is_available("dashscope_rerank")
+    llm_ok = health_registry.is_available("dashscope_llm")
+
+    # Level 0: 完整链路
+    if milvus_ok and rerank_ok:
+        try:
+            if llm_ok:
+                ctx, docs = await retrieve_with_rewrite_and_rerank(query, top_k)
+            else:
+                ctx, docs = retrieve_knowledge.invoke({"query": query})
+                if isinstance(ctx, str) and not docs:
+                    raise ValueError("empty")
+                docs = docs if isinstance(docs, list) else []
+            if docs:
+                retrieval_cache.set(cache_key, (ctx, docs))
+                return ctx, docs, DegradationLevel.NONE
+        except Exception as e:
+            logger.warning(f"完整链路检索失败: {e}")
+
+    # Level 1: 无 Rerank
+    if milvus_ok:
+        try:
+            vector_store = vector_store_manager.get_vector_store()
+            rewritten = query
+            if llm_ok:
+                try:
+                    rewritten = await query_rewriter.rewrite(query)
+                except Exception:
+                    pass
+            vector_results = vector_store.similarity_search_with_score(rewritten, k=top_k + 3)
+            bm25_results = bm25_retriever.search(rewritten, top_k=top_k + 3)
+            merged = _rrf_merge(vector_results, bm25_results, top_k=top_k)
+            if merged:
+                ctx = format_docs(merged)
+                retrieval_cache.set(cache_key, (ctx, merged))
+                return ctx, merged, DegradationLevel.NO_RERANK
+        except Exception as e:
+            logger.warning(f"无 Rerank 检索失败: {e}")
+
+    # Level 2: BM25-only (带改写)
+    if llm_ok:
+        try:
+            rewritten = await query_rewriter.rewrite(query)
+            bm25_results = bm25_retriever.search(rewritten, top_k=top_k)
+            docs = [doc for doc, _ in bm25_results]
+            if docs:
+                ctx = format_docs(docs)
+                retrieval_cache.set(cache_key, (ctx, docs))
+                return ctx, docs, DegradationLevel.BM25_ONLY
+        except Exception as e:
+            logger.warning(f"BM25+改写检索失败: {e}")
+
+    # Level 3: BM25-only (原始查询)
+    try:
+        bm25_results = bm25_retriever.search(query, top_k=top_k)
+        docs = [doc for doc, _ in bm25_results]
+        if docs:
+            ctx = format_docs(docs)
+            retrieval_cache.set(cache_key, (ctx, docs))
+            return ctx, docs, DegradationLevel.BM25_RAW
+    except Exception as e:
+        logger.warning(f"BM25 原始检索失败: {e}")
+
+    # Level 4: 静态兜底
+    logger.warning("所有检索路径均失败，返回静态兜底")
+    return "没有找到相关信息，请稍后重试。", [], DegradationLevel.TEMPLATE
 
 
 def format_docs(docs: List[Document]) -> str:

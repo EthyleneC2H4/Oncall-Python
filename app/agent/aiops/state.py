@@ -1,6 +1,6 @@
 """
 通用 Plan-Execute-Replan 状态定义
-基于 LangGraph 官方教程实现，增加诊断轨迹追踪
+基于 LangGraph 官方教程实现，增加诊断轨迹追踪和降级状态
 """
 
 from typing import List, TypedDict, Annotated
@@ -31,3 +31,10 @@ class PlanExecuteState(TypedDict):
 
     # 诊断事件流（推理轨迹），使用 operator.add 追加
     diagnosis_events: Annotated[List[dict], operator.add]
+
+    # 错误上下文（降级策略追踪），使用 operator.add 追加
+    # 每条: {"step": str, "error_type": str, "error_msg": str}
+    error_context: Annotated[List[dict], operator.add]
+
+    # 当前降级等级
+    degradation_level: str

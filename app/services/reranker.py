@@ -13,6 +13,8 @@ from langchain_core.documents import Document
 from loguru import logger
 
 from app.config import config
+from app.core.circuit_breaker import get_breaker, BREAKER_RERANK, CircuitOpenError
+from app.core.health_registry import health_registry
 
 
 class Reranker:
@@ -43,7 +45,10 @@ class Reranker:
         if len(documents) <= 1:
             return documents
 
+        breaker = get_breaker(BREAKER_RERANK)
         try:
+            breaker.before_call()
+
             # 提取文档文本
             doc_texts = [doc.page_content for doc in documents]
 
@@ -58,6 +63,8 @@ class Reranker:
             )
 
             if response.status_code != 200:
+                breaker.record_failure()
+                health_registry.mark_failure("dashscope_rerank")
                 logger.warning(
                     f"Rerank API 调用失败: {response.code} - {response.message}，"
                     "返回原始排序"
@@ -74,13 +81,20 @@ class Reranker:
                     doc.metadata["rerank_score"] = relevance_score
                     reranked_docs.append(doc)
 
+            breaker.record_success()
+            health_registry.mark_success("dashscope_rerank")
             logger.info(
                 f"Rerank 完成: {len(documents)} 篇 → {len(reranked_docs)} 篇, "
                 f"top score={reranked_docs[0].metadata.get('rerank_score', 'N/A') if reranked_docs else 'N/A'}"
             )
             return reranked_docs
 
+        except CircuitOpenError:
+            logger.warning("Rerank API 熔断，返回原始排序")
+            return documents[:top_n]
         except Exception as e:
+            breaker.record_failure()
+            health_registry.mark_failure("dashscope_rerank")
             logger.error(f"Rerank 失败: {e}，返回原始排序")
             return documents[:top_n]
 

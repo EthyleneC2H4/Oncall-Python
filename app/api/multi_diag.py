@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from app.agent.multi import run_parallel_diagnosis
+from app.agent.multi.coordinator import run_diagnosis_with_degradation
 
 
 router = APIRouter()
@@ -46,8 +47,8 @@ async def multi_agent_diagnose(request: MultiDiagRequest):
                 }, ensure_ascii=False)
             }
 
-            # 执行并行诊断
-            result = await run_parallel_diagnosis(request.alert_input)
+            # 执行并行诊断（带降级保护）
+            result = await run_diagnosis_with_degradation(request.alert_input)
 
             # 发送各 Agent 结果
             for finding in result.agent_findings:
@@ -80,6 +81,17 @@ async def multi_agent_diagnose(request: MultiDiagRequest):
                 }, ensure_ascii=False)
             }
 
+            # 降级状态事件（如果有降级）
+            if result.degradation_level != "none":
+                yield {
+                    "event": "message",
+                    "data": json.dumps({
+                        "type": "degradation_status",
+                        "is_degraded": True,
+                        "level": result.degradation_level,
+                    }, ensure_ascii=False)
+                }
+
             # 完成事件
             yield {
                 "event": "message",
@@ -87,6 +99,7 @@ async def multi_agent_diagnose(request: MultiDiagRequest):
                     "type": "complete",
                     "stage": "multi_diagnosis_complete",
                     "message": "多 Agent 诊断完成",
+                    "degradation_level": result.degradation_level,
                 }, ensure_ascii=False)
             }
 

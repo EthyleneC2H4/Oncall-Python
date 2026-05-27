@@ -14,6 +14,8 @@ from app.config import config
 from loguru import logger
 from app.api import chat, health, file, aiops, kg, multi_diag, feedback
 from app.core.milvus_client import milvus_manager
+from app.core.health_registry import health_registry
+from app.core.circuit_breaker import get_breaker, BREAKER_MILVUS
 
 
 @asynccontextmanager
@@ -25,20 +27,43 @@ async def lifespan(app: FastAPI):
     logger.info(f"📝 环境: {'开发' if config.debug else '生产'}")
     logger.info(f"🌐 监听地址: http://{config.host}:{config.port}")
     logger.info(f"📚 API 文档: http://{config.host}:{config.port}/docs")
-    
-    # 连接 Milvus
+
+    # 注册健康探针
+    health_registry.register("milvus", _probe_milvus)
+    health_registry.register("dashscope_llm")
+    health_registry.register("dashscope_embedding")
+    health_registry.register("dashscope_rerank")
+    health_registry.register("mcp_cls")
+    health_registry.register("mcp_monitor")
+
+    # 连接 Milvus（非致命：连接失败不阻止服务启动）
     logger.info("🔌 正在连接 Milvus...")
-    milvus_manager.connect()
-    logger.info("✅ Milvus 连接成功")
-    
+    try:
+        milvus_manager.connect()
+        logger.info("✅ Milvus 连接成功")
+        health_registry.mark_success("milvus")
+    except Exception as e:
+        logger.warning(f"⚠️ Milvus 连接失败，服务将以降级模式启动: {e}")
+        health_registry.mark_down("milvus")
+        get_breaker(BREAKER_MILVUS).record_failure()
+
+    # 启动后台健康探针
+    await health_registry.start_probes(interval=config.health_probe_interval)
+
     logger.info("=" * 60)
-    
+
     yield
-    
+
     # 关闭时执行
+    await health_registry.stop_probes()
     logger.info("🔌 正在关闭 Milvus 连接...")
     milvus_manager.close()
     logger.info(f"👋 {config.app_name} 关闭")
+
+
+async def _probe_milvus() -> bool:
+    """Milvus 健康探针"""
+    return milvus_manager.health_check()
 
 
 # 创建 FastAPI 应用

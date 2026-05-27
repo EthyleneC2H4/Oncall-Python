@@ -126,6 +126,16 @@ async def replanner(state: PlanExecuteState) -> Dict[str, Any]:
     logger.info(f"剩余计划步骤: {len(plan)}")
     logger.info(f"已执行步骤: {len(past_steps)}")
 
+    # ⚠️ 循环检测：检查是否在重复执行相同步骤
+    if _detect_loop(past_steps):
+        logger.warning("检测到 Replanner 循环（重复步骤），强制生成响应")
+        llm = ChatQwen(
+            model=config.rag_model,
+            api_key=config.dashscope_api_key,
+            temperature=0
+        )
+        return await _generate_response(state, llm)
+
     # ⚠️ 强制限制：如果已执行步骤过多，直接生成响应
     MAX_STEPS = 8
     if len(past_steps) >= MAX_STEPS:
@@ -307,3 +317,36 @@ def _format_simple_steps(past_steps: list) -> str:
         formatted.append(f"{i}. **{step}**\n   {result_preview}\n")
 
     return "\n".join(formatted)
+
+
+def _detect_loop(past_steps: list) -> bool:
+    """检测 Agent 是否在重复执行相同步骤
+
+    两种检测：
+    1. 精确重复：最近 4 步中某步出现 2+ 次
+    2. 模糊重复：最近 2 步 token 重叠度 > 80%
+
+    Returns:
+        True 表示检测到循环
+    """
+    if len(past_steps) < 3:
+        return False
+
+    recent = [step[0].strip().lower() for step in past_steps[-4:]]
+
+    # 精确重复检测
+    from collections import Counter
+    counts = Counter(recent)
+    if any(c >= 2 for c in counts.values()):
+        return True
+
+    # 模糊重复检测
+    if len(recent) >= 2:
+        tokens_a = set(recent[-1].split())
+        tokens_b = set(recent[-2].split())
+        if tokens_a and tokens_b:
+            overlap = len(tokens_a & tokens_b) / max(len(tokens_a), len(tokens_b))
+            if overlap > 0.8:
+                return True
+
+    return False

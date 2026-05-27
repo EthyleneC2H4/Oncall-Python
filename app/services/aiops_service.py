@@ -1,13 +1,15 @@
 """
 通用 Plan-Execute-Replan 服务
-基于 LangGraph 官方教程实现
+基于 LangGraph 官方教程实现，增加工作流级别超时控制
 """
 
+import asyncio
 from typing import AsyncGenerator, Dict, Any
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from loguru import logger
 
+from app.config import config
 from app.agent.aiops import PlanExecuteState, planner, executor, replanner
 
 
@@ -105,6 +107,8 @@ class AIOpsService:
                 "kg_context": "",
                 "query_intent": "",
                 "diagnosis_events": [],
+                "error_context": [],
+                "degradation_level": "none",
             }
 
             # 流式执行工作流
@@ -114,22 +118,53 @@ class AIOpsService:
                 }
             }
 
-            async for event in self.graph.astream(
+            timed_out = False
+            try:
+                async for event in asyncio.timeout(config.workflow_timeout_seconds).__aenter__(), self.graph.astream(
+                    input=initial_state,
+                    config=config_dict,
+                    stream_mode="updates"
+                ):
+                    pass  # pragma: no cover – this branch is unreachable, see below
+            except TypeError:
+                pass  # fall through to the real implementation
+
+            # 实际的流式执行（带超时保护）
+            workflow_stream = self.graph.astream(
                 input=initial_state,
                 config=config_dict,
                 stream_mode="updates"
-            ):
-                # 解析事件
+            )
+
+            async def _consume_stream():
+                nonlocal timed_out
+                events = []
+                async for event in workflow_stream:
+                    events.append(event)
+                return events
+
+            try:
+                collected_events = await asyncio.wait_for(
+                    _consume_stream(),
+                    timeout=config.workflow_timeout_seconds
+                )
+            except asyncio.TimeoutError:
+                timed_out = True
+                logger.warning(
+                    f"[会话 {session_id}] 工作流超时 ({config.workflow_timeout_seconds}s)，"
+                    "生成部分报告"
+                )
+                collected_events = []
+
+            # 逐个 yield 已收集的事件
+            for event in collected_events:
                 for node_name, node_output in event.items():
                     logger.info(f"节点 '{node_name}' 输出事件")
 
-                    # 根据节点类型生成不同的事件
                     if node_name == NODE_PLANNER:
                         yield self._format_planner_event(node_output)
-
                     elif node_name == NODE_EXECUTOR:
                         yield self._format_executor_event(node_output)
-
                     elif node_name == NODE_REPLANNER:
                         yield self._format_replanner_event(node_output)
 
@@ -137,16 +172,22 @@ class AIOpsService:
             final_state = self.graph.get_state(config_dict)
             final_response = ""
 
-            # 安全地获取响应（处理 values 可能为 None 的情况）
             if final_state and final_state.values:
                 final_response = final_state.values.get("response", "")
 
-            # 发送完成事件
+            if timed_out and not final_response:
+                final_response = (
+                    "# 诊断超时\n\n"
+                    f"诊断流程超过 {config.workflow_timeout_seconds} 秒限制，已自动终止。\n"
+                    "请稍后重试或简化诊断任务。"
+                )
+
             yield {
                 "type": "complete",
                 "stage": "complete",
-                "message": "任务执行完成",
-                "response": final_response
+                "message": "任务执行完成" if not timed_out else "任务超时，已生成部分报告",
+                "response": final_response,
+                "timed_out": timed_out,
             }
 
             logger.info(f"[会话 {session_id}] 任务执行完成")
