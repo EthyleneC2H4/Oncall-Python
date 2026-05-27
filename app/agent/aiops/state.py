@@ -25,3 +25,9 @@ class PlanExecuteState(TypedDict):
 
     # 知识图谱上下文（由 planner 注入）
     kg_context: str
+
+    # 查询意图（由 planner 路由分类）
+    query_intent: str
+
+    # 诊断事件流（推理轨迹），使用 operator.add 追加
+    diagnosis_events: Annotated[List[dict], operator.add]

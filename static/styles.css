@@ -1312,3 +1312,45 @@ body {
         right: 0;
     }
 }
+
+/* ========== 反馈按钮 ========== */
+.feedback-bar {
+    display: flex;
+    gap: 4px;
+    margin-top: 8px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.message-content-wrapper:hover .feedback-bar {
+    opacity: 1;
+}
+
+.feedback-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: #9ca3af;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.feedback-btn:hover {
+    background: #f3f4f6;
+    color: #6b7280;
+}
+
+.feedback-btn.active.feedback-positive {
+    background: #dcfce7;
+    color: #16a34a;
+}
+
+.feedback-btn.active.feedback-negative {
+    background: #fee2e2;
+    color: #dc2626;
+}

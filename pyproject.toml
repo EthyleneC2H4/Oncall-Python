@@ -31,6 +31,8 @@ dependencies = [
     "fastmcp>=2.14.0",
     "langchain-qwq>=0.3.4",
     "networkx>=3.2",
+    "rank-bm25>=0.2.2",
+    "jieba>=0.42.1",
 ]
 
 [project.optional-dependencies]

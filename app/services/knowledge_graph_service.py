@@ -405,6 +405,137 @@ class KnowledgeGraphService:
 
         return None
 
+    def update_from_triples(self, triples: list) -> dict:
+        """从抽取的三元组批量更新图谱
+
+        Args:
+            triples: Triple 对象列表（来自 kg_extractor）
+
+        Returns:
+            dict: 更新统计 {"nodes_added", "edges_added"}
+        """
+        nodes_added = 0
+        edges_added = 0
+
+        # 类型到颜色的映射
+        type_defaults = {
+            "alert": {"level": "warning"},
+            "root_cause": {"category": "extracted"},
+            "action": {"urgency": "short_term"},
+            "tool": {"usage": ""},
+            "metric": {"unit": ""},
+        }
+
+        for t in triples:
+            # 添加头实体节点
+            if t.head not in self.graph:
+                defaults = type_defaults.get(t.head_type, {})
+                self.graph.add_node(
+                    t.head, type=t.head_type, label=t.head,
+                    source="extracted", **defaults
+                )
+                nodes_added += 1
+
+            # 添加尾实体节点
+            if t.tail not in self.graph:
+                defaults = type_defaults.get(t.tail_type, {})
+                self.graph.add_node(
+                    t.tail, type=t.tail_type, label=t.tail,
+                    source="extracted", **defaults
+                )
+                nodes_added += 1
+
+            # 添加关系边（检查是否已存在）
+            if not self.graph.has_edge(t.head, t.tail):
+                self.graph.add_edge(
+                    t.head, t.tail,
+                    relation=t.relation, source="extracted"
+                )
+                edges_added += 1
+
+        logger.info(f"图谱增量更新: +{nodes_added} 节点, +{edges_added} 边")
+        return {"nodes_added": nodes_added, "edges_added": edges_added}
+
+    def update_from_incident(self, incident_data: dict) -> dict:
+        """从已解决的故障事件中学习，增量更新图谱
+
+        Args:
+            incident_data: 事件数据，包含 alert_type, root_cause, resolution, cascade_alerts
+
+        Returns:
+            dict: 更新统计
+        """
+        edges_added = 0
+        nodes_added = 0
+
+        alert_type = incident_data.get("alert_type", "")
+        root_cause = incident_data.get("root_cause", "")
+        resolution = incident_data.get("resolution", "")
+        cascade_alerts = incident_data.get("cascade_alerts", [])
+        incident_id = incident_data.get("incident_id", "unknown")
+
+        # 确保告警节点存在
+        if alert_type and alert_type not in self.graph:
+            self.graph.add_node(
+                alert_type, type="alert", label=alert_type,
+                level="warning", source=f"incident_{incident_id}"
+            )
+            nodes_added += 1
+
+        # 添加根因节点和关系
+        if alert_type and root_cause:
+            if root_cause not in self.graph:
+                self.graph.add_node(
+                    root_cause, type="root_cause", label=root_cause,
+                    category="incident", source=f"incident_{incident_id}"
+                )
+                nodes_added += 1
+            if not self.graph.has_edge(alert_type, root_cause):
+                self.graph.add_edge(
+                    alert_type, root_cause,
+                    relation="CAUSED_BY",
+                    source=f"incident_{incident_id}"
+                )
+                edges_added += 1
+
+        # 添加处置动作和关系
+        if root_cause and resolution:
+            if resolution not in self.graph:
+                self.graph.add_node(
+                    resolution, type="action", label=resolution,
+                    urgency="short_term", source=f"incident_{incident_id}"
+                )
+                nodes_added += 1
+            if not self.graph.has_edge(root_cause, resolution):
+                self.graph.add_edge(
+                    root_cause, resolution,
+                    relation="RESOLVED_BY",
+                    source=f"incident_{incident_id}"
+                )
+                edges_added += 1
+
+        # 添加级联关系
+        for cascade in cascade_alerts:
+            if cascade not in self.graph:
+                self.graph.add_node(
+                    cascade, type="alert", label=cascade,
+                    level="warning", source=f"incident_{incident_id}"
+                )
+                nodes_added += 1
+            if not self.graph.has_edge(alert_type, cascade):
+                self.graph.add_edge(
+                    alert_type, cascade,
+                    relation="MAY_TRIGGER",
+                    reason=f"来自事件 {incident_id}",
+                    source=f"incident_{incident_id}"
+                )
+                edges_added += 1
+
+        logger.info(
+            f"从事件 {incident_id} 学习: +{nodes_added} 节点, +{edges_added} 边"
+        )
+        return {"nodes_added": nodes_added, "edges_added": edges_added}
+
     def get_graph_stats(self) -> dict:
         """获取图谱统计信息"""
         type_counts: dict[str, int] = {}

@@ -103,6 +103,8 @@ class AIOpsService:
                 "past_steps": [],
                 "response": "",
                 "kg_context": "",
+                "query_intent": "",
+                "diagnosis_events": [],
             }
 
             # 流式执行工作流
@@ -273,6 +275,8 @@ class AIOpsService:
 
         plan = state.get("plan", [])
         kg_context = state.get("kg_context", "")
+        query_intent = state.get("query_intent", "")
+        diagnosis_events = state.get("diagnosis_events", [])
 
         event = {
             "type": "plan",
@@ -282,6 +286,10 @@ class AIOpsService:
         }
         if kg_context:
             event["kg_context"] = kg_context
+        if query_intent:
+            event["query_intent"] = query_intent
+        if diagnosis_events:
+            event["diagnosis_events"] = diagnosis_events
 
         return event
 

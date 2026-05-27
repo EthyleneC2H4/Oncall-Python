@@ -3,6 +3,7 @@ Planner 节点：制定执行计划
 基于 LangGraph 官方教程实现
 """
 
+import time
 from textwrap import dedent
 from typing import Dict, Any, List
 from langchain_core.prompts import ChatPromptTemplate
@@ -11,9 +12,11 @@ from pydantic import BaseModel, Field
 from loguru import logger
 
 from app.config import config
-from app.tools import get_current_time, retrieve_knowledge, query_alert_graph, predict_alert_cascade
+from app.tools import get_current_time, retrieve_knowledge, retrieve_with_hyde, retrieve_with_rewrite_and_rerank, query_alert_graph, predict_alert_cascade
 from app.agent.mcp_client import get_mcp_client_with_retry
 from app.services.knowledge_graph_service import knowledge_graph_service
+from app.services.query_router import query_router
+from app.services.context_assembler import context_assembler
 from .state import PlanExecuteState
 from .utils import format_tools_description
 
@@ -75,34 +78,47 @@ async def planner(state: PlanExecuteState) -> Dict[str, Any]:
     logger.info(f"用户输入: {input_text}")
 
     try:
-        # 步骤1: 查询内部文档获取相关经验
-        logger.info("查询内部文档，寻找相关经验...")
+        # 步骤0: 查询意图分类与路由
+        intent, keywords = await query_router.route(input_text)
+        strategy = query_router.get_retrieval_strategy(intent)
+        logger.info(f"查询路由: intent={intent}, keywords={keywords}, strategy={strategy}")
+
+        # 步骤1: 根据路由策略检索文档（含 Query Rewrite + BM25 + Rerank）
         experience_docs = ""
-        try:
-            # retrieve_knowledge 使用 response_format="content_and_artifact"
-            # ainvoke() 只返回 content（字符串），不是元组
-            context_str = await retrieve_knowledge.ainvoke({"query": input_text})
-            if context_str and context_str.strip():
-                experience_docs = context_str
-                logger.info(f"找到相关经验文档，长度: {len(experience_docs)}")
-            else:
-                logger.info("未找到相关经验文档")
-        except Exception as e:
-            logger.warning(f"查询内部文档失败: {e}")
+        if strategy["use_rag"]:
+            logger.info("查询内部文档，寻找相关经验...")
+            try:
+                if strategy["use_hyde"]:
+                    # 全链路增强检索：Rewrite + HyDE + BM25 + Rerank
+                    logger.info("使用全链路增强检索 (Rewrite+HyDE+BM25+Rerank)")
+                    context_str, _ = await retrieve_with_hyde(input_text, top_k=strategy["rag_top_k"])
+                else:
+                    # 快速增强检索：Rewrite + BM25 + Rerank（无 HyDE，适合诊断类）
+                    logger.info("使用快速增强检索 (Rewrite+BM25+Rerank)")
+                    context_str, _ = await retrieve_with_rewrite_and_rerank(input_text, top_k=strategy["rag_top_k"])
+                if context_str and context_str.strip():
+                    experience_docs = context_str
+                    logger.info(f"找到相关经验文档，长度: {len(experience_docs)}")
+                else:
+                    logger.info("未找到相关经验文档")
+            except Exception as e:
+                logger.warning(f"查询内部文档失败: {e}")
 
         # 步骤1.5: 查询知识图谱获取结构化关联信息
         kg_context = ""
-        try:
-            # 从输入中提取告警关键词，查询知识图谱
-            for keyword in ["CPU", "内存", "memory", "磁盘", "disk", "响应", "slow", "不可用", "unavailable", "OOM"]:
-                if keyword.lower() in input_text.lower():
-                    kg_analysis = knowledge_graph_service.format_analysis_context(keyword)
-                    if kg_analysis:
-                        kg_context = kg_analysis
-                        logger.info(f"知识图谱命中关键词: {keyword}")
-                        break
-        except Exception as e:
-            logger.warning(f"知识图谱查询失败: {e}")
+        if strategy["use_kg"]:
+            try:
+                # 优先使用路由提取的关键词，再尝试默认关键词列表
+                all_keywords = keywords + ["CPU", "内存", "memory", "磁盘", "disk", "响应", "slow", "不可用", "unavailable", "OOM"]
+                for keyword in all_keywords:
+                    if keyword.lower() in input_text.lower():
+                        kg_analysis = knowledge_graph_service.format_analysis_context(keyword)
+                        if kg_analysis:
+                            kg_context = kg_analysis
+                            logger.info(f"知识图谱命中关键词: {keyword}")
+                            break
+            except Exception as e:
+                logger.warning(f"知识图谱查询失败: {e}")
 
         # 步骤2: 获取可用工具列表
         # 获取本地工具
@@ -124,32 +140,11 @@ async def planner(state: PlanExecuteState) -> Dict[str, Any]:
         # 格式化工具描述
         tools_description = format_tools_description(all_tools)
 
-        # 步骤3: 格式化经验文档上下文（融合知识图谱 + 文档检索）
-        context_parts = []
-
-        if kg_context:
-            context_parts.append(dedent(f"""
-                ## 知识图谱分析（结构化关联信息）
-
-                以下是从运维知识图谱中获取的告警关联分析，包含根因、级联风险和推荐处置：
-
-                {kg_context}
-
-                ---
-            """).strip())
-
-        if experience_docs:
-            context_parts.append(dedent(f"""
-                ## 相关经验文档
-
-                以下是从知识库中检索到的相关经验和最佳实践，请参考这些经验制定执行计划：
-
-                {experience_docs}
-
-                ---
-            """).strip())
-
-        experience_context = "\n\n".join(context_parts)
+        # 步骤3: 使用上下文组装器格式化经验上下文
+        experience_context = context_assembler.format_experience_context(
+            kg_context=kg_context,
+            rag_context=experience_docs,
+        )
 
         # 步骤4: 创建 LLM 并生成计划
         llm = ChatQwen(
@@ -178,7 +173,41 @@ async def planner(state: PlanExecuteState) -> Dict[str, Any]:
         for i, step in enumerate(plan_steps, 1):
             logger.info(f"  步骤{i}: {step}")
 
-        return {"plan": plan_steps, "kg_context": kg_context}
+        # 构建诊断事件
+        events = []
+        events.append({
+            "timestamp": time.time(),
+            "event_type": "routing",
+            "agent": "planner",
+            "action": f"查询意图分类: {intent}",
+            "result_summary": f"关键词: {', '.join(keywords)}",
+            "duration_ms": 0,
+        })
+        if kg_context:
+            events.append({
+                "timestamp": time.time(),
+                "event_type": "kg_query",
+                "agent": "planner",
+                "action": "知识图谱查询",
+                "result_summary": kg_context[:200],
+                "duration_ms": 0,
+            })
+        if experience_docs:
+            events.append({
+                "timestamp": time.time(),
+                "event_type": "rag_retrieve",
+                "agent": "planner",
+                "action": f"文档检索 (HyDE={strategy['use_hyde']})",
+                "result_summary": f"检索到 {len(experience_docs)} 字符的相关文档",
+                "duration_ms": 0,
+            })
+
+        return {
+            "plan": plan_steps,
+            "kg_context": kg_context,
+            "query_intent": intent,
+            "diagnosis_events": events,
+        }
 
     except Exception as e:
         logger.error(f"生成计划失败: {e}", exc_info=True)
@@ -188,5 +217,13 @@ async def planner(state: PlanExecuteState) -> Dict[str, Any]:
                 "收集相关信息",
                 "分析数据",
                 "生成报告"
-            ]
+            ],
+            "diagnosis_events": [{
+                "timestamp": time.time(),
+                "event_type": "reasoning",
+                "agent": "planner",
+                "action": "生成计划失败，使用默认计划",
+                "result_summary": str(e),
+                "duration_ms": 0,
+            }],
         }

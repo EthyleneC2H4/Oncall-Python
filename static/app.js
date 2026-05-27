@@ -947,22 +947,74 @@ class SuperBizAgentApp {
         }
 
         messageContentWrapper.appendChild(messageContent);
+
+        // 为 assistant 消息添加反馈按钮（非流式时）
+        if (type === 'assistant' && !isStreaming && content) {
+            const feedbackBar = document.createElement('div');
+            feedbackBar.className = 'feedback-bar';
+            const msgIndex = this.currentChatHistory.length - 1;
+            feedbackBar.innerHTML = `
+                <button class="feedback-btn feedback-positive" data-type="positive" data-index="${msgIndex}" title="诊断正确">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <button class="feedback-btn feedback-negative" data-type="negative" data-index="${msgIndex}" title="诊断有误">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10zM17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+            `;
+            feedbackBar.querySelectorAll('.feedback-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => this.handleFeedback(e));
+            });
+            messageContentWrapper.appendChild(feedbackBar);
+        }
+
         messageDiv.appendChild(messageContentWrapper);
 
         if (this.chatMessages) {
             this.chatMessages.appendChild(messageDiv);
-            
+
             // 如果是第一条消息，移除居中样式并添加动画
             if (isFirstMessage && this.chatContainer) {
                 this.chatContainer.classList.remove('centered');
                 // 添加动画类
                 this.chatContainer.style.transition = 'all 0.5s ease';
             }
-            
+
             this.scrollToBottom();
         }
 
         return messageDiv;
+    }
+
+    // 处理用户反馈
+    async handleFeedback(event) {
+        const btn = event.currentTarget;
+        const feedbackType = btn.dataset.type;
+        const msgIndex = parseInt(btn.dataset.index);
+
+        // 视觉反馈
+        const feedbackBar = btn.parentElement;
+        feedbackBar.querySelectorAll('.feedback-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/feedback`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    session_id: this.sessionId,
+                    message_index: msgIndex,
+                    feedback_type: feedbackType,
+                    comment: '',
+                    actual_root_cause: '',
+                }),
+            });
+            const data = await response.json();
+            if (data.code === 200) {
+                btn.title = feedbackType === 'positive' ? '已标记为正确' : '已标记为有误';
+            }
+        } catch (error) {
+            console.error('反馈提交失败:', error);
+        }
     }
 
     // 添加带加载动画的消息

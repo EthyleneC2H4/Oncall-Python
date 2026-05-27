@@ -12,6 +12,7 @@ from loguru import logger
 from app.config import config
 from app.tools import get_current_time, retrieve_knowledge, query_alert_graph, predict_alert_cascade
 from app.agent.mcp_client import get_mcp_client_with_retry
+from app.harness.agent_rules import AGENT_RULES
 from .state import PlanExecuteState
 
 
@@ -64,7 +65,7 @@ async def executor(state: PlanExecuteState) -> Dict[str, Any]:
 
         # 构建消息（只包含当前步骤，避免原始任务干扰）
         messages = [
-            SystemMessage(content="""你是一个能力强大的助手，负责执行具体的任务步骤。
+            SystemMessage(content=f"""你是一个能力强大的助手，负责执行具体的任务步骤。
 
 你可以使用各种工具来完成任务。对于每个步骤：
 1. 理解步骤的目标
@@ -76,7 +77,9 @@ async def executor(state: PlanExecuteState) -> Dict[str, Any]:
 - 如果工具调用失败，请说明失败原因
 - 不要编造数据，只返回实际获取的信息
 - 执行结果要清晰、准确
-- 专注于当前步骤，不要考虑其他任务"""),
+- 专注于当前步骤，不要考虑其他任务
+
+{AGENT_RULES}"""),
             HumanMessage(content=f"请执行以下任务: {task}")
         ]
 

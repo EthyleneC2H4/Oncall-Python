@@ -12,7 +12,7 @@ import os
 
 from app.config import config
 from loguru import logger
-from app.api import chat, health, file, aiops, kg
+from app.api import chat, health, file, aiops, kg, multi_diag, feedback
 from app.core.milvus_client import milvus_manager
 
 
@@ -64,6 +64,8 @@ app.include_router(chat.router, prefix="/api", tags=["对话"])
 app.include_router(file.router, prefix="/api", tags=["文件管理"])
 app.include_router(aiops.router, prefix="/api", tags=["AIOps智能运维"])
 app.include_router(kg.router, prefix="/api", tags=["知识图谱"])
+app.include_router(multi_diag.router, prefix="/api", tags=["多Agent诊断"])
+app.include_router(feedback.router, prefix="/api", tags=["反馈与评测"])
 
 # 挂载静态文件
 static_dir = "static"

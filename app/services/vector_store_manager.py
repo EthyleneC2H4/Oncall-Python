@@ -9,6 +9,7 @@ from loguru import logger
 from app.config import config
 from app.core.milvus_client import milvus_manager
 from app.services.vector_embedding_service import vector_embedding_service
+from app.services.bm25_retriever import bm25_retriever
 
 
 # 统一使用 biz collection
@@ -87,6 +88,10 @@ class VectorStoreManager:
                 f"批量添加 {len(documents)} 个文档到 VectorStore 完成, "
                 f"耗时: {elapsed:.2f}秒, 平均: {elapsed/len(documents):.2f}秒/个"
             )
+
+            # 文档变更后使 BM25 索引失效，下次检索时自动重建
+            bm25_retriever.invalidate()
+
             return result_ids
         except Exception as e:
             logger.error(f"添加文档失败: {e}")
