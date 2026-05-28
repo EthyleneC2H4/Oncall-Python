@@ -34,7 +34,17 @@ class IncidentRecord(BaseModel):
     timestamp: str = Field(default="", description="事件时间")
 
 
-EXTRACT_PROMPT = """从以下运维文档中抽取实体和关系三元组。
+def _get_extract_prompt() -> str:
+    """获取 KG 抽取 Prompt，优先从版本化管理器加载"""
+    try:
+        from app.core.prompt_manager import prompt_manager
+        template = prompt_manager.get("extract")
+        if template:
+            return template.content
+    except Exception:
+        pass
+
+    return """从以下运维文档中抽取实体和关系三元组。
 
 ## 实体类型
 - alert: 告警类型（如 CPU使用率过高、内存不足、服务不可用）
@@ -65,6 +75,9 @@ EXTRACT_PROMPT = """从以下运维文档中抽取实体和关系三元组。
 - 实体名称使用简洁的中文
 - 每个三元组必须包含所有字段
 """
+
+
+EXTRACT_PROMPT = _get_extract_prompt()
 
 
 class KGExtractor:

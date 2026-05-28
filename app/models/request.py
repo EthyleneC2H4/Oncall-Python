@@ -3,6 +3,9 @@
 定义 API 请求的 Pydantic 模型
 """
 
+from datetime import datetime
+from uuid import uuid4
+
 from pydantic import BaseModel, Field
 
 
@@ -29,3 +32,17 @@ class ClearRequest(BaseModel):
 
     class Config:
         populate_by_name = True
+
+
+class AiRequest(BaseModel):
+    """标准化 AI 请求模型
+
+    统一所有入口的请求格式，为鉴权、限流、审计提供基础。
+    """
+    request_id: str = Field(default_factory=lambda: str(uuid4()))
+    user_id: str = "anonymous"
+    session_id: str = "default"
+    scene_code: str = "chat"  # chat / aiops / multi_diagnose / kg_query
+    input: str = ""
+    variables: dict = Field(default_factory=dict)
+    timestamp: datetime = Field(default_factory=datetime.now)

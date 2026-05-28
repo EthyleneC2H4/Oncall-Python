@@ -1,6 +1,7 @@
 """FastAPI 应用入口
 
-主应用程序，配置路由、中间件、静态文件等
+主应用程序，配置路由、中间件、静态文件等。
+集成工程化组件：可观测性、限流、输入安全、审计日志。
 """
 
 from fastapi import FastAPI
@@ -27,6 +28,22 @@ async def lifespan(app: FastAPI):
     logger.info(f"📝 环境: {'开发' if config.debug else '生产'}")
     logger.info(f"🌐 监听地址: http://{config.host}:{config.port}")
     logger.info(f"📚 API 文档: http://{config.host}:{config.port}/docs")
+
+    # 初始化 Prompt 模板管理器
+    try:
+        from app.core.prompt_manager import prompt_manager
+        templates = prompt_manager.list_templates()
+        logger.info(f"📋 Prompt 模板加载: {len(templates)} 个")
+    except Exception as e:
+        logger.warning(f"Prompt 模板加载失败: {e}")
+
+    # 初始化审计日志
+    from app.core.audit import audit_logger
+    logger.info(f"📝 审计日志: {audit_logger.audit_file}")
+
+    # 初始化工具注册中心
+    from app.tools.tool_registry import tool_registry
+    logger.info(f"🔧 工具注册: {len(tool_registry.list_tools())} 个")
 
     # 注册健康探针
     health_registry.register("milvus", _probe_milvus)
@@ -82,6 +99,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 注册工程化中间件
+from app.middleware.rate_limiter import RateLimiterMiddleware
+from app.middleware.request_guard import RequestGuardMiddleware
+
+app.add_middleware(RequestGuardMiddleware)
+app.add_middleware(RateLimiterMiddleware)
 
 # 注册路由
 app.include_router(health.router, tags=["健康检查"])

@@ -37,53 +37,85 @@ class Act(BaseModel):
     )
 
 
+def _get_replanner_prompt_text() -> str:
+    """获取 Replanner Prompt，优先从版本化管理器加载"""
+    try:
+        from app.core.prompt_manager import prompt_manager
+        template = prompt_manager.get("replanner")
+        if template:
+            logger.debug(f"加载 Replanner Prompt 模板: v{template.version}")
+            return template.content
+    except Exception:
+        pass
+
+    return dedent("""
+        作为一个重新规划专家，你需要根据已执行的步骤决定下一步行动。
+
+        可用工具列表（用于制定计划时参考）：
+
+        {tools_description}
+
+        注意：你的职责是制定或调整计划，实际的工具调用由 Executor 负责执行。
+
+        你有三个选择（按优先级排序）：
+
+        **1. 'respond' - 信息充足，立即生成最终响应** 【最高优先级】
+           - 使用场景：当前信息已经足够回答用户问题
+           - 决策标准：
+             * 已执行步骤 >= 3 且获取了关键信息
+             * 或者已执行步骤 >= 5（无论结果如何）
+             * 或者当前信息完全满足任务需求
+           - 不要等到"完美"才响应，"足够好"就应该立即 respond
+
+        **2. 'continue' - 当前计划合理，继续执行** 【次优先级】
+           - 使用场景：剩余计划合理且必要
+           - 决策标准：剩余步骤确实能提供关键信息
+           - 如果剩余步骤不是"必需"的，应选择 respond
+
+        **3. 'replan' - 当前计划有严重问题** 【最低优先级，谨慎使用】
+           - 使用场景：原计划明显错误或遗漏关键步骤
+           - **严格限制**：
+             * 新步骤数量必须 <= 当前剩余步骤数
+             * 优先简化计划，不要添加不必要的步骤
+             * 总步骤数已执行 >= 5 次时，禁止 replan，只能 respond
+
+        评估标准：
+        - 当前信息是否已经足够解决用户问题？【最关键】
+        - 已执行步骤是否成功获取了核心信息？
+        - 剩余步骤是否真的"必需"？
+        - 已执行步骤数是否过多（>= 5）？如果是，立即 respond
+
+        **决策优先级口诀：**
+        "优先结束 > 保持不变 > 调整计划"
+        "信息足够就响应，不要追求完美"
+    """).strip()
+
+
+def _get_response_prompt_text() -> str:
+    """获取 Response Prompt，优先从版本化管理器加载"""
+    try:
+        from app.core.prompt_manager import prompt_manager
+        template = prompt_manager.get("response")
+        if template:
+            return template.content
+    except Exception:
+        pass
+
+    return dedent("""
+        根据原始任务和已执行步骤的结果，生成一个全面的最终响应。
+
+        响应要求：
+        - 清晰、结构化
+        - 基于实际数据，不要编造
+        - 如果某些步骤失败，要诚实说明
+        - 使用 Markdown 格式
+    """).strip()
+
+
 # Replanner 提示词
 replanner_prompt = ChatPromptTemplate.from_messages(
     [
-        (
-            "system",
-            dedent("""
-                作为一个重新规划专家，你需要根据已执行的步骤决定下一步行动。
-
-                可用工具列表（用于制定计划时参考）：
-
-                {tools_description}
-
-                注意：你的职责是制定或调整计划，实际的工具调用由 Executor 负责执行。
-
-                你有三个选择（按优先级排序）：
-
-                **1. 'respond' - 信息充足，立即生成最终响应** 【最高优先级】
-                   - 使用场景：当前信息已经足够回答用户问题
-                   - 决策标准：
-                     * 已执行步骤 >= 3 且获取了关键信息
-                     * 或者已执行步骤 >= 5（无论结果如何）
-                     * 或者当前信息完全满足任务需求
-                   - ⚠️ 不要等到"完美"才响应，"足够好"就应该立即 respond
-
-                **2. 'continue' - 当前计划合理，继续执行** 【次优先级】
-                   - 使用场景：剩余计划合理且必要
-                   - 决策标准：剩余步骤确实能提供关键信息
-                   - ⚠️ 如果剩余步骤不是"必需"的，应选择 respond
-
-                **3. 'replan' - 当前计划有严重问题** 【最低优先级，谨慎使用】
-                   - 使用场景：原计划明显错误或遗漏关键步骤
-                   - ⚠️ **严格限制**：
-                     * 新步骤数量必须 <= 当前剩余步骤数
-                     * 优先简化计划，不要添加不必要的步骤
-                     * 总步骤数已执行 >= 5 次时，禁止 replan，只能 respond
-
-                评估标准：
-                - 当前信息是否已经足够解决用户问题？【最关键】
-                - 已执行步骤是否成功获取了核心信息？
-                - 剩余步骤是否真的"必需"？
-                - 已执行步骤数是否过多（>= 5）？如果是，立即 respond
-
-                **决策优先级口诀：** 
-                "优先结束 > 保持不变 > 调整计划"
-                "信息足够就响应，不要追求完美"
-            """).strip(),
-        ),
+        ("system", _get_replanner_prompt_text()),
         ("placeholder", "{messages}"),
     ]
 )
@@ -91,18 +123,7 @@ replanner_prompt = ChatPromptTemplate.from_messages(
 # 最终响应生成提示词
 response_prompt = ChatPromptTemplate.from_messages(
     [
-        (
-            "system",
-            dedent("""
-                根据原始任务和已执行步骤的结果，生成一个全面的最终响应。
-
-                响应要求：
-                - 清晰、结构化
-                - 基于实际数据，不要编造
-                - 如果某些步骤失败，要诚实说明
-                - 使用 Markdown 格式
-            """).strip(),
-        ),
+        ("system", _get_response_prompt_text()),
         ("placeholder", "{messages}"),
     ]
 )

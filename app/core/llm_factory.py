@@ -2,7 +2,7 @@
 
 使用 LangChain ChatOpenAI 通过 OpenAI 兼容模式调用阿里云 DashScope。
 支持降级链：qwen-max → qwen-plus → 缓存 → 模板响应。
-所有调用附带超时控制和熔断保护。
+所有调用附带超时控制、熔断保护和成本追踪。
 """
 
 import asyncio
@@ -15,6 +15,7 @@ from app.config import config
 from app.core.circuit_breaker import get_breaker, BREAKER_LLM, CircuitOpenError
 from app.core.cache import llm_response_cache, make_cache_key
 from app.core.degradation import DegradationLevel, get_template_response
+from app.core.cost_tracker import cost_tracker
 
 
 class LLMFactory:
@@ -83,6 +84,18 @@ class LLMFactory:
             )
             breaker.record_success()
             content = result.content if hasattr(result, "content") else str(result)
+
+            # 成本追踪
+            usage = getattr(result, "usage_metadata", None) or {}
+            input_tokens = usage.get("input_tokens", 0) if isinstance(usage, dict) else 0
+            output_tokens = usage.get("output_tokens", 0) if isinstance(usage, dict) else 0
+            cost_tracker.record(
+                model=config.dashscope_model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                scene=context,
+            )
+
             if use_cache and cache_key:
                 llm_response_cache.set(cache_key, content)
             return content, DegradationLevel.NONE
@@ -106,6 +119,18 @@ class LLMFactory:
                 backup_llm.ainvoke(prompt), timeout=timeout_seconds
             )
             content = result.content if hasattr(result, "content") else str(result)
+
+            # 成本追踪
+            usage = getattr(result, "usage_metadata", None) or {}
+            input_tokens = usage.get("input_tokens", 0) if isinstance(usage, dict) else 0
+            output_tokens = usage.get("output_tokens", 0) if isinstance(usage, dict) else 0
+            cost_tracker.record(
+                model=LLMFactory.BACKUP_MODEL,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                scene=context,
+            )
+
             if use_cache and cache_key:
                 llm_response_cache.set(cache_key, content)
             logger.info("LLM 备用模型调用成功")

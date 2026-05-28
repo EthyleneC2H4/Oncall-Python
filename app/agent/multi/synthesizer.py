@@ -7,20 +7,30 @@ from loguru import logger
 from app.config import config
 
 
-SYNTHESIS_PROMPT = """你是一个高级运维诊断综合分析师。你需要汇总多个专业 Agent 的分析结果，交叉验证各方发现，生成最终诊断报告。
+def _get_synthesis_prompt() -> str:
+    """获取 Synthesizer Prompt，优先从版本化管理器加载"""
+    try:
+        from app.core.prompt_manager import prompt_manager
+        template = prompt_manager.get("synthesizer")
+        if template:
+            return template.content
+    except Exception:
+        pass
+
+    return """你是一个高级运维诊断综合分析师。你需要汇总多个专业 Agent 的分析结果，交叉验证各方发现，生成最终诊断报告。
 
 ## 原始告警
 {alert_input}
 
 ## 各 Agent 分析结果
 
-### 日志分析 Agent（置信度: {log_confidence:.0%}）
+### 日志分析 Agent（置信度: {log_confidence}）
 {log_findings}
 
-### 指标检查 Agent（置信度: {metric_confidence:.0%}）
+### 指标检查 Agent（置信度: {metric_confidence}）
 {metric_findings}
 
-### 知识检索 Agent（置信度: {knowledge_confidence:.0%}）
+### 知识检索 Agent（置信度: {knowledge_confidence}）
 {knowledge_findings}
 
 ## 你的任务
@@ -32,6 +42,9 @@ SYNTHESIS_PROMPT = """你是一个高级运维诊断综合分析师。你需要�
 
 请输出结构化的 Markdown 诊断报告。
 """
+
+
+SYNTHESIS_PROMPT = _get_synthesis_prompt()
 
 
 class Synthesizer:
@@ -81,9 +94,14 @@ class Synthesizer:
                 agent_data["knowledge_confidence"] = finding.confidence
 
         try:
+            # 格式化置信度为百分比字符串
+            formatted_data = dict(agent_data)
+            for key in ("log_confidence", "metric_confidence", "knowledge_confidence"):
+                formatted_data[key] = f"{formatted_data[key]:.0%}"
+
             prompt = SYNTHESIS_PROMPT.format(
                 alert_input=alert_input,
-                **agent_data,
+                **formatted_data,
             )
 
             messages = [

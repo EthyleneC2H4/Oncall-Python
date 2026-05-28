@@ -103,12 +103,53 @@ async def get_feedback_stats():
 
 @router.post("/eval/run")
 async def run_evaluation():
-    """运行端到端评测
+    """运行端到端评测（基础版）
 
     执行预定义的测试用例，评测路由准确率、检索召回率、KG 根因命中率等。
+    优先从 eval/datasets/ 加载 55+ 评测用例。
     """
     logger.info("开始运行 AIOps 评测")
     evaluator = AIOpsEvaluator()
     results = await evaluator.evaluate_all()
     logger.info(f"评测完成: {results.get('summary', {})}")
     return {"code": 200, "data": results}
+
+
+@router.post("/eval/ragas")
+async def run_ragas_evaluation():
+    """运行 RAGAS 风格评测（扩展版）
+
+    支持 Context Recall / Context Precision / 路由准确率 等维度。
+    使用 eval/datasets/ 下的 55+ 评测用例。
+    """
+    from app.eval.ragas_evaluator import ragas_evaluator
+
+    logger.info("开始运行 RAGAS 评测")
+    results = await ragas_evaluator.evaluate_all()
+    logger.info(f"RAGAS 评测完成: {results.get('summary', {})}")
+    return {"code": 200, "data": results}
+
+
+@router.get("/eval/datasets/stats")
+async def get_dataset_stats():
+    """获取评测数据集统计"""
+    from app.eval.ragas_evaluator import ragas_evaluator
+
+    diagnostic = ragas_evaluator.diagnostic_cases
+    negative = ragas_evaluator.negative_cases
+
+    # 按类别统计
+    categories: dict[str, int] = {}
+    for case in diagnostic + negative:
+        cat = case.get("category", "unknown")
+        categories[cat] = categories.get(cat, 0) + 1
+
+    return {
+        "code": 200,
+        "data": {
+            "total": len(diagnostic) + len(negative),
+            "diagnostic": len(diagnostic),
+            "negative": len(negative),
+            "by_category": categories,
+        },
+    }

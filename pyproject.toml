@@ -1,6 +1,6 @@
 [project]
 name = "super-biz-agent-py"
-version = "1.2.1"
+version = "2.0.0"
 description = "基于 LangChain 的智能业务代理系统 - 支持 RAG 知识库和 AIOps 智能运维"
 authors = [{name = "chief"}]
 readme = "README.md"
@@ -33,6 +33,7 @@ dependencies = [
     "networkx>=3.2",
     "rank-bm25>=0.2.2",
     "jieba>=0.42.1",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

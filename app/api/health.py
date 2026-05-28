@@ -7,6 +7,7 @@ from app.config import config
 from app.core.milvus_client import milvus_manager
 from app.core.health_registry import health_registry
 from app.core.cache import embedding_cache, llm_response_cache, retrieval_cache
+from app.core.cost_tracker import cost_tracker
 from loguru import logger
 
 router = APIRouter()
@@ -53,6 +54,28 @@ async def health_check():
         "llm_response": llm_response_cache.stats,
         "retrieval": retrieval_cache.stats,
     }
+
+    # 成本统计
+    health_data["cost"] = cost_tracker.get_summary()
+
+    # Prompt 模板状态
+    try:
+        from app.core.prompt_manager import prompt_manager
+        health_data["prompts"] = {
+            "loaded": len(prompt_manager.list_templates()),
+            "templates": [t["name"] for t in prompt_manager.list_templates()],
+        }
+    except Exception:
+        health_data["prompts"] = {"loaded": 0}
+
+    # 工具注册状态
+    try:
+        from app.tools.tool_registry import tool_registry
+        health_data["tool_registry"] = {
+            "registered": len(tool_registry.list_tools()),
+        }
+    except Exception:
+        health_data["tool_registry"] = {"registered": 0}
 
     # 判断整体健康状态
     overall_status = "healthy"

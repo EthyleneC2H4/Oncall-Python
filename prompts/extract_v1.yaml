@@ -1,0 +1,40 @@
+name: extract
+version: 1
+description: "KG 三元组抽取 — 从运维文档中自动抽取实体和关系"
+variables:
+  - name: document
+    required: true
+model_config:
+  model: qwen-max
+  temperature: 0
+content: |
+  从以下运维文档中抽取实体和关系三元组。
+
+  ## 实体类型
+  - alert: 告警类型（如 CPU使用率过高、内存不足、服务不可用）
+  - root_cause: 根因（如 内存泄漏、死循环、流量突增）
+  - action: 处置动作（如 重启服务、扩容、回滚代码）
+  - tool: 工具（如 top命令、jmap、日志查询）
+  - metric: 监控指标（如 CPU使用率、内存使用率、响应时间）
+
+  ## 关系类型
+  - CAUSED_BY: 告警由根因引起
+  - RESOLVED_BY: 根因通过某个动作解决
+  - MAY_TRIGGER: 告警可能触发另一个告警（级联）
+  - USES: 动作使用某个工具
+  - INDICATES: 指标异常表明某个告警
+
+  ## 文档内容
+  {document}
+
+  ## 输出格式
+  请输出 JSON 格式，不要包含其他内容：
+  {{"triples": [
+      {{"head": "CPU使用率过高", "head_type": "alert", "relation": "CAUSED_BY", "tail": "死循环", "tail_type": "root_cause"}},
+      {{"head": "死循环", "head_type": "root_cause", "relation": "RESOLVED_BY", "tail": "重启服务", "tail_type": "action"}}
+  ]}}
+
+  注意：
+  - 只抽取文档中明确提到的实体和关系，不要推测
+  - 实体名称使用简洁的中文
+  - 每个三元组必须包含所有字段

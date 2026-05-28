@@ -1,22 +1,26 @@
 """AIOps 端到端评测框架
 
-支持三个维度的评测：
-1. 检索质量（Recall@K, MRR）
-2. 诊断准确性（根因命中率）
-3. 响应延迟（TTFT, 完整诊断耗时）
+支持从外部 JSON 数据集加载评测用例。
+评测维度：路由准确率、检索召回率、KG 覆盖率、根因命中率。
+配合 ragas_evaluator.py 和 llm_judge.py 实现完整评测体系。
 """
 
+import json
 import time
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
 
 class AIOpsEvaluator:
-    """AIOps 端到端评测"""
+    """AIOps 端到端评测
 
-    # 预定义测试用例
-    test_cases = [
+    优先从 eval/datasets/ 加载用例，无文件时 fallback 到内置 5 个用例。
+    """
+
+    # 内置测试用例（向后兼容）
+    _builtin_cases = [
         {
             "id": "TC001",
             "query": "CPU持续高于90%，伴随OOM日志",
@@ -58,6 +62,44 @@ class AIOpsEvaluator:
             "relevant_docs": ["memory_high_usage.md"],
         },
     ]
+
+    def __init__(self, datasets_dir: str = "eval/datasets"):
+        self.datasets_dir = Path(datasets_dir)
+        self._test_cases: list[dict] | None = None
+
+    @property
+    def test_cases(self) -> list[dict]:
+        """优先从文件加载，fallback 到内置用例"""
+        if self._test_cases is None:
+            self._test_cases = self._load_cases()
+        return self._test_cases
+
+    def _load_cases(self) -> list[dict]:
+        """从 eval/datasets/ 加载用例"""
+        cases = []
+        diagnostic_file = self.datasets_dir / "diagnostic_cases.json"
+        negative_file = self.datasets_dir / "negative_cases.json"
+
+        for filepath in [diagnostic_file, negative_file]:
+            if filepath.exists():
+                try:
+                    with open(filepath, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    # 兼容旧格式：补充 relevant_docs 字段
+                    for case in data:
+                        if "relevant_docs" not in case:
+                            case["relevant_docs"] = case.get("expected_docs", [])
+                    cases.extend(data)
+                    logger.info(f"加载评测集: {filepath.name}, {len(data)} 个用例")
+                except Exception as e:
+                    logger.warning(f"加载评测集失败 {filepath}: {e}")
+
+        if not cases:
+            logger.info("未找到外部评测集，使用内置 5 个用例")
+            return list(self._builtin_cases)
+
+        logger.info(f"评测集总计: {len(cases)} 个用例")
+        return cases
 
     async def evaluate_all(self) -> dict[str, Any]:
         """运行所有测试用例，返回评测结果"""

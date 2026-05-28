@@ -12,7 +12,17 @@ from loguru import logger
 from app.config import config
 
 
-REWRITE_PROMPT = """你是一个运维领域的查询改写专家。请将用户的口语化查询改写为更适合检索运维知识库的规范化查询。
+def _get_rewrite_prompt() -> str:
+    """获取查询改写 Prompt，优先从版本化管理器加载"""
+    try:
+        from app.core.prompt_manager import prompt_manager
+        template = prompt_manager.get("rewrite")
+        if template:
+            return template.content
+    except Exception:
+        pass
+
+    return """你是一个运维领域的查询改写专家。请将用户的口语化查询改写为更适合检索运维知识库的规范化查询。
 
 改写规则：
 1. 保留原始意图，不要改变语义
@@ -30,6 +40,9 @@ REWRITE_PROMPT = """你是一个运维领域的查询改写专家。请将用户
 
 用户查询: {query}
 改写后的查询:"""
+
+
+REWRITE_PROMPT = _get_rewrite_prompt()
 
 
 class QueryRewriter:

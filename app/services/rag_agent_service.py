@@ -144,14 +144,21 @@ class RagAgentService:
         """
         构建结构化系统提示词
 
-        采用 角色/目标/约束/执行流/输出格式 分层结构，
-        让模型更稳定地遵循预设流程，减少发散。
+        优先从 Prompt 版本化管理器加载，fallback 到硬编码。
 
         Returns:
             str: 系统提示词
         """
-        from textwrap import dedent
+        try:
+            from app.core.prompt_manager import prompt_manager
+            template = prompt_manager.get("system_prompt")
+            if template:
+                logger.debug(f"加载 Prompt 模板: system_prompt v{template.version}")
+                return template.content.strip()
+        except Exception as e:
+            logger.debug(f"Prompt 模板加载失败，使用内置: {e}")
 
+        from textwrap import dedent
         return dedent("""
             ## 角色
             你是一个智能运维助手（AIOps Agent），专注于基于知识图谱和文档检索的故障诊断与告警分析。

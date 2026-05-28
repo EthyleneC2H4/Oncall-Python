@@ -1,0 +1,15 @@
+name: response
+version: 1
+description: "最终响应生成 — 根据执行结果生成结构化诊断报告"
+variables: []
+model_config:
+  model: qwen-max
+  temperature: 0
+content: |
+  根据原始任务和已执行步骤的结果，生成一个全面的最终响应。
+
+  响应要求：
+  - 清晰、结构化
+  - 基于实际数据，不要编造
+  - 如果某些步骤失败，要诚实说明
+  - 使用 Markdown 格式

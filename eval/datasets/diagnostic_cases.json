@@ -1,0 +1,452 @@
+[
+  {
+    "id": "TC001",
+    "category": "easy",
+    "query": "CPU持续高于90%，伴随OOM日志",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["MemoryLeak", "JVMConfigIssue", "内存泄漏"],
+    "expected_docs": ["cpu_high_usage.md", "memory_high_usage.md"],
+    "expected_answer_contains": ["内存泄漏", "JVM参数"],
+    "tags": ["cpu", "memory", "oom"]
+  },
+  {
+    "id": "TC002",
+    "category": "easy",
+    "query": "磁盘使用率超过90%，日志写入变慢",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["LogFileTooLarge", "日志文件过大", "临时文件堆积"],
+    "expected_docs": ["disk_high_usage.md"],
+    "expected_answer_contains": ["日志", "磁盘"],
+    "tags": ["disk", "log"]
+  },
+  {
+    "id": "TC003",
+    "category": "easy",
+    "query": "服务响应时间P99超过5秒",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["DBSlowQuery", "数据库慢查询", "外部API调用超时"],
+    "expected_docs": ["slow_response.md"],
+    "expected_answer_contains": ["慢查询", "响应"],
+    "tags": ["latency", "slow"]
+  },
+  {
+    "id": "TC004",
+    "category": "easy",
+    "query": "服务不可用，健康检查持续失败",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["AppCrash", "应用崩溃", "数据库连接失败"],
+    "expected_docs": ["service_unavailable.md"],
+    "expected_answer_contains": ["重启", "回滚"],
+    "tags": ["unavailable", "crash"]
+  },
+  {
+    "id": "TC005",
+    "category": "easy",
+    "query": "内存使用率飙升至95%，GC频繁",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["MemoryLeak", "内存泄漏", "缓存配置不当"],
+    "expected_docs": ["memory_high_usage.md"],
+    "expected_answer_contains": ["内存", "GC"],
+    "tags": ["memory", "gc"]
+  },
+  {
+    "id": "TC006",
+    "category": "easy",
+    "query": "CPU使用率100%，进程无响应",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["DeadLoop", "死循环", "线程死锁"],
+    "expected_docs": ["cpu_high_usage.md"],
+    "expected_answer_contains": ["CPU", "进程"],
+    "tags": ["cpu", "deadlock"]
+  },
+  {
+    "id": "TC007",
+    "category": "easy",
+    "query": "数据库连接池耗尽，新请求全部失败",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["ConnectionPoolExhausted", "连接泄漏", "慢查询"],
+    "expected_docs": ["slow_response.md"],
+    "expected_answer_contains": ["连接池", "数据库"],
+    "tags": ["database", "connection"]
+  },
+  {
+    "id": "TC008",
+    "category": "easy",
+    "query": "网络延迟突然升高，丢包率增加",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["NetworkCongestion", "网络拥塞", "带宽不足"],
+    "expected_docs": ["slow_response.md"],
+    "expected_answer_contains": ["网络", "延迟"],
+    "tags": ["network", "latency"]
+  },
+  {
+    "id": "TC009",
+    "category": "easy",
+    "query": "应用启动失败，端口被占用",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["PortConflict", "端口冲突", "进程残留"],
+    "expected_docs": ["service_unavailable.md"],
+    "expected_answer_contains": ["端口", "启动"],
+    "tags": ["startup", "port"]
+  },
+  {
+    "id": "TC010",
+    "category": "easy",
+    "query": "日志中出现大量NullPointerException",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["CodeBug", "代码缺陷", "空指针"],
+    "expected_docs": ["service_unavailable.md"],
+    "expected_answer_contains": ["空指针", "异常"],
+    "tags": ["exception", "code"]
+  },
+  {
+    "id": "TC011",
+    "category": "easy",
+    "query": "SSL证书即将过期",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["CertExpiry", "证书过期"],
+    "expected_docs": [],
+    "expected_answer_contains": ["证书", "续期"],
+    "tags": ["ssl", "certificate"]
+  },
+  {
+    "id": "TC012",
+    "category": "easy",
+    "query": "磁盘IO持续打满，iowait很高",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["DiskIOHigh", "磁盘IO高", "大量随机读写"],
+    "expected_docs": ["disk_high_usage.md"],
+    "expected_answer_contains": ["磁盘", "IO"],
+    "tags": ["disk", "io"]
+  },
+  {
+    "id": "TC013",
+    "category": "easy",
+    "query": "Redis内存溢出，新写入被拒绝",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["CacheOverflow", "缓存溢出", "过期策略不当"],
+    "expected_docs": ["memory_high_usage.md"],
+    "expected_answer_contains": ["Redis", "内存"],
+    "tags": ["redis", "memory"]
+  },
+  {
+    "id": "TC014",
+    "category": "easy",
+    "query": "消息队列积压严重，消费者处理不过来",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["ConsumerLag", "消费者延迟", "处理能力不足"],
+    "expected_docs": [],
+    "expected_answer_contains": ["消息队列", "积压"],
+    "tags": ["mq", "backlog"]
+  },
+  {
+    "id": "TC015",
+    "category": "easy",
+    "query": "负载均衡健康检查失败，节点被摘除",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["HealthCheckFail", "节点异常", "服务故障"],
+    "expected_docs": ["service_unavailable.md"],
+    "expected_answer_contains": ["健康检查", "负载均衡"],
+    "tags": ["lb", "health"]
+  },
+  {
+    "id": "TC016",
+    "category": "medium",
+    "query": "系统突然变慢了，用户反馈页面打不开",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["TrafficSpike", "流量突增", "资源不足"],
+    "expected_docs": ["slow_response.md"],
+    "expected_answer_contains": ["响应", "慢"],
+    "tags": ["slow", "user-report"]
+  },
+  {
+    "id": "TC017",
+    "category": "medium",
+    "query": "昨晚上线后今天早上开始报错，错误数越来越多",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["CodeBug", "发布引入缺陷", "配置错误"],
+    "expected_docs": ["service_unavailable.md"],
+    "expected_answer_contains": ["发布", "回滚"],
+    "tags": ["deploy", "error"]
+  },
+  {
+    "id": "TC018",
+    "category": "medium",
+    "query": "服务时好时坏的，一会儿能访问一会儿不行",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["Flapping", "资源竞争", "GC停顿"],
+    "expected_docs": ["service_unavailable.md"],
+    "expected_answer_contains": ["间歇性", "不稳定"],
+    "tags": ["flapping", "intermittent"]
+  },
+  {
+    "id": "TC019",
+    "category": "medium",
+    "query": "内存一直在涨，每隔几天就得重启一次",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["MemoryLeak", "内存泄漏", "对象未释放"],
+    "expected_docs": ["memory_high_usage.md"],
+    "expected_answer_contains": ["内存泄漏", "重启"],
+    "tags": ["memory", "leak"]
+  },
+  {
+    "id": "TC020",
+    "category": "medium",
+    "query": "告警太多了，各种指标都不正常，不知道从哪开始排查",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["CascadeFailure", "级联故障"],
+    "expected_docs": ["cpu_high_usage.md", "memory_high_usage.md"],
+    "expected_answer_contains": ["告警", "排查"],
+    "tags": ["cascade", "multiple"]
+  },
+  {
+    "id": "TC021",
+    "category": "medium",
+    "query": "凌晨3点自动扩容了好几次，但是CPU其实不高",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["AutoscaleFlapping", "扩容策略不当", "指标误判"],
+    "expected_docs": [],
+    "expected_answer_contains": ["扩容", "自动"],
+    "tags": ["autoscale", "night"]
+  },
+  {
+    "id": "TC022",
+    "category": "medium",
+    "query": "接口偶尔超时，大部分时候正常，日志里有connection reset",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["ConnectionReset", "网络抖动", "后端重启"],
+    "expected_docs": ["slow_response.md"],
+    "expected_answer_contains": ["连接", "超时"],
+    "tags": ["timeout", "intermittent"]
+  },
+  {
+    "id": "TC023",
+    "category": "medium",
+    "query": "服务内存一直在80%左右徘徊，偶尔飙到95%触发告警",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["MemoryPressure", "内存不足", "缓存过大"],
+    "expected_docs": ["memory_high_usage.md"],
+    "expected_answer_contains": ["内存", "缓存"],
+    "tags": ["memory", "threshold"]
+  },
+  {
+    "id": "TC024",
+    "category": "medium",
+    "query": "数据库主从延迟持续增大，读请求数据不一致",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["ReplicationLag", "主从延迟", "大事务"],
+    "expected_docs": [],
+    "expected_answer_contains": ["主从", "延迟"],
+    "tags": ["database", "replication"]
+  },
+  {
+    "id": "TC025",
+    "category": "medium",
+    "query": "API返回502，Nginx日志里upstream timed out",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["UpstreamTimeout", "上游超时", "后端阻塞"],
+    "expected_docs": ["slow_response.md"],
+    "expected_answer_contains": ["502", "上游"],
+    "tags": ["nginx", "502"]
+  },
+  {
+    "id": "TC026",
+    "category": "medium",
+    "query": "部署新版本后Kafka消费组出现大量rebalance",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["ConsumerRebalance", "消费者重平衡", "心跳超时"],
+    "expected_docs": [],
+    "expected_answer_contains": ["Kafka", "消费"],
+    "tags": ["kafka", "deploy"]
+  },
+  {
+    "id": "TC027",
+    "category": "medium",
+    "query": "服务重启后需要很长时间才能恢复正常，warmup太慢",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["SlowWarmup", "预热慢", "缓存未命中"],
+    "expected_docs": ["service_unavailable.md"],
+    "expected_answer_contains": ["预热", "启动"],
+    "tags": ["warmup", "startup"]
+  },
+  {
+    "id": "TC028",
+    "category": "medium",
+    "query": "线上出现OOM Killer把进程杀了",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["OOMKilled", "内存超限", "cgroup限制"],
+    "expected_docs": ["memory_high_usage.md"],
+    "expected_answer_contains": ["OOM", "内存"],
+    "tags": ["oom", "killed"]
+  },
+  {
+    "id": "TC029",
+    "category": "medium",
+    "query": "监控看到TCP连接数暴增到几万，很多TIME_WAIT",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["ConnectionLeak", "连接泄漏", "短连接过多"],
+    "expected_docs": [],
+    "expected_answer_contains": ["连接", "TCP"],
+    "tags": ["tcp", "connection"]
+  },
+  {
+    "id": "TC030",
+    "category": "medium",
+    "query": "定时任务执行时间越来越长，从几分钟变成了几小时",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["DataGrowth", "数据量增长", "索引缺失"],
+    "expected_docs": ["slow_response.md"],
+    "expected_answer_contains": ["定时任务", "慢"],
+    "tags": ["cron", "slow"]
+  },
+  {
+    "id": "TC031",
+    "category": "hard",
+    "query": "系统偶尔卡顿几秒然后恢复，监控指标看不出异常",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["GCPause", "GC停顿", "STW"],
+    "expected_docs": ["memory_high_usage.md", "slow_response.md"],
+    "expected_answer_contains": ["GC", "停顿"],
+    "tags": ["gc", "stw", "hidden"]
+  },
+  {
+    "id": "TC032",
+    "category": "hard",
+    "query": "用户说有的请求成功有的失败，但我们这边看日志没有错误",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["PartialFailure", "部分节点异常", "负载不均"],
+    "expected_docs": ["service_unavailable.md"],
+    "expected_answer_contains": ["部分", "节点"],
+    "tags": ["partial", "inconsistent"]
+  },
+  {
+    "id": "TC033",
+    "category": "hard",
+    "query": "性能突然下降但是没有任何变更，上次部署是两周前",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["ExternalChange", "外部依赖变化", "数据增长"],
+    "expected_docs": ["slow_response.md"],
+    "expected_answer_contains": ["外部", "变化"],
+    "tags": ["mysterious", "no-change"]
+  },
+  {
+    "id": "TC034",
+    "category": "hard",
+    "query": "流量没变但是错误率突然从0.1%升到了5%",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["SilentDegradation", "依赖降级", "证书问题"],
+    "expected_docs": ["service_unavailable.md"],
+    "expected_answer_contains": ["错误率", "依赖"],
+    "tags": ["error-rate", "sudden"]
+  },
+  {
+    "id": "TC035",
+    "category": "hard",
+    "query": "每天固定时间段出现性能抖动，持续约30分钟",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["ScheduledJob", "定时任务冲突", "备份作业"],
+    "expected_docs": ["slow_response.md"],
+    "expected_answer_contains": ["定时", "时间"],
+    "tags": ["periodic", "scheduled"]
+  },
+  {
+    "id": "TC036",
+    "category": "hard",
+    "query": "服务在A机房正常但在B机房频繁超时",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["CrossDCLatency", "跨机房延迟", "网络路由"],
+    "expected_docs": [],
+    "expected_answer_contains": ["机房", "网络"],
+    "tags": ["multi-dc", "network"]
+  },
+  {
+    "id": "TC037",
+    "category": "hard",
+    "query": "Full GC后内存没降下来，堆里全是byte数组",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["MemoryLeak", "对象泄漏", "大对象残留"],
+    "expected_docs": ["memory_high_usage.md"],
+    "expected_answer_contains": ["GC", "泄漏"],
+    "tags": ["gc", "heap", "advanced"]
+  },
+  {
+    "id": "TC038",
+    "category": "hard",
+    "query": "调用链路中某个中间服务偶尔返回空响应但HTTP状态码200",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["SilentFailure", "静默失败", "超时降级"],
+    "expected_docs": [],
+    "expected_answer_contains": ["空响应", "中间服务"],
+    "tags": ["silent", "empty-response"]
+  },
+  {
+    "id": "TC039",
+    "category": "hard",
+    "query": "Kubernetes Pod不断被杀掉重启但没有OOM事件",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["LivenessProbe", "探针配置不当", "启动超时"],
+    "expected_docs": ["service_unavailable.md"],
+    "expected_answer_contains": ["Pod", "探针"],
+    "tags": ["k8s", "restart"]
+  },
+  {
+    "id": "TC040",
+    "category": "hard",
+    "query": "线程数持续增长但CPU使用率不高，最终服务挂掉",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": ["ThreadLeak", "线程泄漏", "阻塞IO"],
+    "expected_docs": ["cpu_high_usage.md"],
+    "expected_answer_contains": ["线程", "阻塞"],
+    "tags": ["thread", "leak"]
+  },
+  {
+    "id": "TC041",
+    "category": "edge_case",
+    "query": "量子计算节点的纠缠态出现退相干",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": [],
+    "expected_docs": [],
+    "expected_answer_contains": [],
+    "tags": ["unknown", "edge"]
+  },
+  {
+    "id": "TC042",
+    "category": "edge_case",
+    "query": "GPU显存溢出，CUDA out of memory",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": [],
+    "expected_docs": [],
+    "expected_answer_contains": ["显存", "GPU"],
+    "tags": ["gpu", "edge"]
+  },
+  {
+    "id": "TC043",
+    "category": "edge_case",
+    "query": "区块链节点同步高度落后主网500个区块",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": [],
+    "expected_docs": [],
+    "expected_answer_contains": [],
+    "tags": ["blockchain", "edge"]
+  },
+  {
+    "id": "TC044",
+    "category": "edge_case",
+    "query": "IoT设备心跳丢失超过阈值",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": [],
+    "expected_docs": [],
+    "expected_answer_contains": [],
+    "tags": ["iot", "edge"]
+  },
+  {
+    "id": "TC045",
+    "category": "edge_case",
+    "query": "CDN节点缓存命中率骤降至10%",
+    "expected_intent": "DIAGNOSTIC",
+    "expected_root_causes": [],
+    "expected_docs": [],
+    "expected_answer_contains": ["CDN", "缓存"],
+    "tags": ["cdn", "edge"]
+  }
+]

@@ -1,0 +1,92 @@
+[
+  {
+    "id": "NEG001",
+    "category": "chitchat",
+    "query": "你好，你是谁？",
+    "expected_intent": "CHITCHAT",
+    "expected_root_causes": [],
+    "expected_docs": [],
+    "tags": ["greeting"]
+  },
+  {
+    "id": "NEG002",
+    "category": "chitchat",
+    "query": "今天天气怎么样",
+    "expected_intent": "CHITCHAT",
+    "expected_root_causes": [],
+    "expected_docs": [],
+    "tags": ["weather"]
+  },
+  {
+    "id": "NEG003",
+    "category": "chitchat",
+    "query": "帮我写一首诗",
+    "expected_intent": "CHITCHAT",
+    "expected_root_causes": [],
+    "expected_docs": [],
+    "tags": ["creative"]
+  },
+  {
+    "id": "NEG004",
+    "category": "chitchat",
+    "query": "1+1等于几",
+    "expected_intent": "CHITCHAT",
+    "expected_root_causes": [],
+    "expected_docs": [],
+    "tags": ["math"]
+  },
+  {
+    "id": "NEG005",
+    "category": "chitchat",
+    "query": "推荐一部电影",
+    "expected_intent": "CHITCHAT",
+    "expected_root_causes": [],
+    "expected_docs": [],
+    "tags": ["recommendation"]
+  },
+  {
+    "id": "NEG006",
+    "category": "knowledge",
+    "query": "什么是向量数据库？",
+    "expected_intent": "KNOWLEDGE",
+    "expected_root_causes": [],
+    "expected_docs": [],
+    "tags": ["concept"]
+  },
+  {
+    "id": "NEG007",
+    "category": "knowledge",
+    "query": "如何配置Milvus索引参数",
+    "expected_intent": "KNOWLEDGE",
+    "expected_root_causes": [],
+    "expected_docs": [],
+    "tags": ["howto"]
+  },
+  {
+    "id": "NEG008",
+    "category": "knowledge",
+    "query": "BM25算法的原理是什么",
+    "expected_intent": "KNOWLEDGE",
+    "expected_root_causes": [],
+    "expected_docs": [],
+    "tags": ["algorithm"]
+  },
+  {
+    "id": "NEG009",
+    "category": "knowledge",
+    "query": "怎么部署Docker容器",
+    "expected_intent": "KNOWLEDGE",
+    "expected_root_causes": [],
+    "expected_docs": [],
+    "tags": ["deploy"]
+  },
+  {
+    "id": "NEG010",
+    "category": "knowledge",
+    "query": "Kubernetes和Docker Compose的区别",
+    "expected_intent": "KNOWLEDGE",
+    "expected_root_causes": [],
+    "expected_docs": [],
+    "tags": ["comparison"]
+  }
+]

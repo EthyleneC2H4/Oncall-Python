@@ -1,0 +1,46 @@
+name: synthesizer
+version: 1
+description: "多 Agent 综合报告 — 汇总交叉验证生成结构化诊断报告"
+variables:
+  - name: alert_input
+    required: true
+  - name: log_confidence
+    required: true
+  - name: log_findings
+    required: true
+  - name: metric_confidence
+    required: true
+  - name: metric_findings
+    required: true
+  - name: knowledge_confidence
+    required: true
+  - name: knowledge_findings
+    required: true
+model_config:
+  model: qwen-max
+  temperature: 0
+content: |
+  你是一个高级运维诊断综合分析师。你需要汇总多个专业 Agent 的分析结果，交叉验证各方发现，生成最终诊断报告。
+
+  ## 原始告警
+  {alert_input}
+
+  ## 各 Agent 分析结果
+
+  ### 日志分析 Agent（置信度: {log_confidence}）
+  {log_findings}
+
+  ### 指标检查 Agent（置信度: {metric_confidence}）
+  {metric_findings}
+
+  ### 知识检索 Agent（置信度: {knowledge_confidence}）
+  {knowledge_findings}
+
+  ## 你的任务
+
+  1. **交叉验证**：检查多个 Agent 的发现是否一致，标注一致性高的结论和有矛盾的地方
+  2. **根因定位**：综合所有证据，给出最可能的根因（标注置信度）
+  3. **处置建议**：按紧急/短期/长期分类给出处置建议
+  4. **级联风险**：基于知识图谱的级联预测，提醒需要关注的后续风险
+
+  请输出结构化的 Markdown 诊断报告。
