@@ -116,18 +116,61 @@ async def run_evaluation():
 
 
 @router.post("/eval/ragas")
-async def run_ragas_evaluation():
-    """运行 RAGAS 风格评测（扩展版）
+async def run_ragas_evaluation(
+    mode: str = "component",
+    categories: str | None = None,
+    metrics: str | None = None,
+    max_cases: int | None = None,
+    save: bool = False,
+):
+    """运行 RAGAS 评测
 
-    支持 Context Recall / Context Precision / 路由准确率 等维度。
-    使用 eval/datasets/ 下的 55+ 评测用例。
+    Args:
+        mode: 评测模式
+            - "component": 组件级快速评测（路由+检索+KG，不调用 LLM 生成）
+            - "e2e": 端到端 RAGAS 评测（retrieve → generate → RAGAS evaluate）
+        categories: 逗号分隔的类别过滤 (easy,medium,hard,edge_case,chitchat,knowledge)
+        metrics: 逗号分隔的 RAGAS 指标（仅 e2e 模式有效）
+            可选: faithfulness,answer_relevancy,context_recall,context_precision
+        max_cases: 最大评测用例数（仅 e2e 模式，限制成本）
+        save: 是否保存结果到文件
     """
     from app.eval.ragas_evaluator import ragas_evaluator
 
-    logger.info("开始运行 RAGAS 评测")
-    results = await ragas_evaluator.evaluate_all()
+    cat_list = [c.strip() for c in categories.split(",")] if categories else None
+    metric_list = [m.strip() for m in metrics.split(",")] if metrics else None
+
+    logger.info(f"开始运行 RAGAS 评测: mode={mode}, categories={cat_list}, metrics={metric_list}")
+    results = await ragas_evaluator.evaluate_all(
+        mode=mode,
+        categories=cat_list,
+        metrics=metric_list,
+        max_cases=max_cases,
+    )
+
+    if save:
+        saved_path = ragas_evaluator.save_results(results)
+        results["saved_to"] = saved_path
+
     logger.info(f"RAGAS 评测完成: {results.get('summary', {})}")
     return {"code": 200, "data": results}
+
+
+@router.post("/eval/ragas/judge")
+async def run_llm_judge(
+    question: str,
+    context: str,
+    answer: str,
+):
+    """运行 LLM-as-Judge 评测（单次）
+
+    对给定的 question/context/answer 进行 Faithfulness + Relevancy 评分。
+    """
+    from app.eval.llm_judge import llm_judge
+
+    logger.info(f"LLM Judge 评测: {question[:30]}...")
+    result = await llm_judge.judge_full(question, context, answer)
+    return {"code": 200, "data": result}
 
 
 @router.get("/eval/datasets/stats")

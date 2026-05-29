@@ -7,7 +7,8 @@
     "expected_root_causes": ["MemoryLeak", "JVMConfigIssue", "内存泄漏"],
     "expected_docs": ["cpu_high_usage.md", "memory_high_usage.md"],
     "expected_answer_contains": ["内存泄漏", "JVM参数"],
-    "tags": ["cpu", "memory", "oom"]
+    "tags": ["cpu", "memory", "oom"],
+    "reference": "CPU持续高于90%且伴随OOM日志，根因通常是内存泄漏或JVM参数配置不当。建议：1）导出堆内存快照（jmap -dump）进行分析；2）检查JVM堆内存参数（-Xmx/-Xms）是否配置合理；3）排查是否存在对象未释放导致的内存泄漏；4）临时可通过重启服务缓解。级联风险：可能导致FrequentGC、OOMError、SlowResponse。"
   },
   {
     "id": "TC002",
@@ -17,7 +18,8 @@
     "expected_root_causes": ["LogFileTooLarge", "日志文件过大", "临时文件堆积"],
     "expected_docs": ["disk_high_usage.md"],
     "expected_answer_contains": ["日志", "磁盘"],
-    "tags": ["disk", "log"]
+    "tags": ["disk", "log"],
+    "reference": "磁盘使用率超过90%且日志写入变慢，根因通常是日志文件过大或临时文件堆积。建议：1）清理过期日志文件（find /var/log -mtime +7 -delete）；2）配置日志轮转（logrotate）防止单文件过大；3）检查临时文件目录（/tmp）是否有堆积；4）必要时进行磁盘扩容。级联风险：可能导致DiskIOHigh、ServiceUnavailable。"
   },
   {
     "id": "TC003",
@@ -27,7 +29,8 @@
     "expected_root_causes": ["DBSlowQuery", "数据库慢查询", "外部API调用超时"],
     "expected_docs": ["slow_response.md"],
     "expected_answer_contains": ["慢查询", "响应"],
-    "tags": ["latency", "slow"]
+    "tags": ["latency", "slow"],
+    "reference": "服务响应时间P99超过5秒，根因通常是数据库慢查询或外部API调用超时。建议：1）查看慢查询日志，优化慢SQL（添加索引、优化查询）；2）检查外部依赖服务的响应时间；3）增加缓存层减少数据库压力；4）考虑降级非关键功能。级联风险：可能导致HighErrorRate、ServiceUnavailable。"
   },
   {
     "id": "TC004",
@@ -37,7 +40,8 @@
     "expected_root_causes": ["AppCrash", "应用崩溃", "数据库连接失败"],
     "expected_docs": ["service_unavailable.md"],
     "expected_answer_contains": ["重启", "回滚"],
-    "tags": ["unavailable", "crash"]
+    "tags": ["unavailable", "crash"],
+    "reference": "服务不可用且健康检查持续失败，根因通常是应用崩溃或数据库连接失败。建议：1）检查应用日志确认崩溃原因；2）尝试重启服务实例；3）如果是近期发布导致，执行代码回滚；4）检查数据库连接是否正常，必要时切换备用服务。"
   },
   {
     "id": "TC005",
@@ -47,7 +51,8 @@
     "expected_root_causes": ["MemoryLeak", "内存泄漏", "缓存配置不当"],
     "expected_docs": ["memory_high_usage.md"],
     "expected_answer_contains": ["内存", "GC"],
-    "tags": ["memory", "gc"]
+    "tags": ["memory", "gc"],
+    "reference": "内存使用率飙升至95%且GC频繁，根因通常是内存泄漏或缓存配置不当。建议：1）导出内存快照分析泄漏对象；2）检查缓存大小配置是否合理；3）排查是否有大对象未被正确释放；4）临时重启实例缓解。级联风险：可能导致OOMError、HighCPUUsage、ServiceUnavailable。"
   },
   {
     "id": "TC006",
@@ -57,7 +62,8 @@
     "expected_root_causes": ["DeadLoop", "死循环", "线程死锁"],
     "expected_docs": ["cpu_high_usage.md"],
     "expected_answer_contains": ["CPU", "进程"],
-    "tags": ["cpu", "deadlock"]
+    "tags": ["cpu", "deadlock"],
+    "reference": "CPU使用率100%且进程无响应，根因通常是死循环或线程死锁。建议：1）使用top/htop定位高CPU线程；2）通过jstack导出线程栈分析死锁；3）检查是否存在无限循环逻辑；4）必要时强制重启进程。"
   },
   {
     "id": "TC007",
@@ -67,7 +73,8 @@
     "expected_root_causes": ["ConnectionPoolExhausted", "连接泄漏", "慢查询"],
     "expected_docs": ["slow_response.md"],
     "expected_answer_contains": ["连接池", "数据库"],
-    "tags": ["database", "connection"]
+    "tags": ["database", "connection"],
+    "reference": "数据库连接池耗尽导致新请求失败，根因通常是连接泄漏或慢查询长时间占用连接。建议：1）检查是否存在未正确关闭的数据库连接；2）优化慢查询减少连接占用时间；3）适当增大连接池最大连接数；4）配置连接超时和空闲连接回收策略。"
   },
   {
     "id": "TC008",
@@ -77,7 +84,8 @@
     "expected_root_causes": ["NetworkCongestion", "网络拥塞", "带宽不足"],
     "expected_docs": ["slow_response.md"],
     "expected_answer_contains": ["网络", "延迟"],
-    "tags": ["network", "latency"]
+    "tags": ["network", "latency"],
+    "reference": "网络延迟突然升高且丢包率增加，根因通常是网络拥塞或带宽不足。建议：1）使用ping/traceroute/mtr定位网络瓶颈；2）检查带宽使用率是否达到上限；3）排查是否有异常流量占用带宽；4）联系网络团队检查交换机/路由器状态。"
   },
   {
     "id": "TC009",
@@ -87,7 +95,8 @@
     "expected_root_causes": ["PortConflict", "端口冲突", "进程残留"],
     "expected_docs": ["service_unavailable.md"],
     "expected_answer_contains": ["端口", "启动"],
-    "tags": ["startup", "port"]
+    "tags": ["startup", "port"],
+    "reference": "应用启动失败且端口被占用，根因通常是端口冲突或旧进程残留。建议：1）使用lsof -i:PORT或netstat查找占用端口的进程；2）确认是否有旧实例未正确关闭；3）终止占用端口的进程后重新启动；4）如果需要多实例，配置不同端口。"
   },
   {
     "id": "TC010",
@@ -97,7 +106,8 @@
     "expected_root_causes": ["CodeBug", "代码缺陷", "空指针"],
     "expected_docs": ["service_unavailable.md"],
     "expected_answer_contains": ["空指针", "异常"],
-    "tags": ["exception", "code"]
+    "tags": ["exception", "code"],
+    "reference": "日志中出现大量NullPointerException，根因是代码缺陷导致的空指针异常。建议：1）根据异常堆栈定位具体代码行；2）检查空值校验逻辑是否完善；3）如果是近期发布引入，考虑回滚；4）修复代码中的空指针风险点。"
   },
   {
     "id": "TC011",
@@ -107,7 +117,8 @@
     "expected_root_causes": ["CertExpiry", "证书过期"],
     "expected_docs": [],
     "expected_answer_contains": ["证书", "续期"],
-    "tags": ["ssl", "certificate"]
+    "tags": ["ssl", "certificate"],
+    "reference": "SSL证书即将过期需要及时处理。建议：1）确认证书到期时间；2）向CA机构申请续期或重新签发证书；3）更新服务器上的证书文件并重新加载配置；4）建立证书到期监控告警，提前30天预警。"
   },
   {
     "id": "TC012",
@@ -117,7 +128,8 @@
     "expected_root_causes": ["DiskIOHigh", "磁盘IO高", "大量随机读写"],
     "expected_docs": ["disk_high_usage.md"],
     "expected_answer_contains": ["磁盘", "IO"],
-    "tags": ["disk", "io"]
+    "tags": ["disk", "io"],
+    "reference": "磁盘IO持续打满且iowait很高，根因通常是大量随机读写或日志写入过频。建议：1）使用iostat/iotop定位高IO进程；2）检查是否有大量日志写入或频繁的磁盘读写操作；3）优化数据库查询减少磁盘IO；4）考虑升级SSD或增加磁盘缓存。"
   },
   {
     "id": "TC013",
@@ -127,7 +139,8 @@
     "expected_root_causes": ["CacheOverflow", "缓存溢出", "过期策略不当"],
     "expected_docs": ["memory_high_usage.md"],
     "expected_answer_contains": ["Redis", "内存"],
-    "tags": ["redis", "memory"]
+    "tags": ["redis", "memory"],
+    "reference": "Redis内存溢出导致新写入被拒绝，根因通常是缓存溢出或过期策略不当。建议：1）检查maxmemory配置是否合理；2）确认过期策略（maxmemory-policy）是否设置正确；3）清理不必要的缓存数据；4）考虑对大key进行拆分或增加Redis节点。"
   },
   {
     "id": "TC014",
@@ -137,7 +150,8 @@
     "expected_root_causes": ["ConsumerLag", "消费者延迟", "处理能力不足"],
     "expected_docs": [],
     "expected_answer_contains": ["消息队列", "积压"],
-    "tags": ["mq", "backlog"]
+    "tags": ["mq", "backlog"],
+    "reference": "消息队列积压严重且消费者处理不过来，根因通常是消费者处理能力不足或消费逻辑存在瓶颈。建议：1）增加消费者实例数量进行水平扩展；2）检查消费逻辑中是否有阻塞操作；3）调整消费者批量拉取大小；4）排查是否有异常消息导致消费卡住。"
   },
   {
     "id": "TC015",
@@ -147,7 +161,8 @@
     "expected_root_causes": ["HealthCheckFail", "节点异常", "服务故障"],
     "expected_docs": ["service_unavailable.md"],
     "expected_answer_contains": ["健康检查", "负载均衡"],
-    "tags": ["lb", "health"]
+    "tags": ["lb", "health"],
+    "reference": "负载均衡健康检查失败导致节点被摘除，根因通常是后端服务故障或健康检查配置不当。建议：1）检查被摘除节点的服务状态；2）查看节点日志确认故障原因；3）确认健康检查路径和超时配置是否合理；4）修复节点问题后重新加入负载均衡。"
   },
   {
     "id": "TC016",
@@ -157,7 +172,8 @@
     "expected_root_causes": ["TrafficSpike", "流量突增", "资源不足"],
     "expected_docs": ["slow_response.md"],
     "expected_answer_contains": ["响应", "慢"],
-    "tags": ["slow", "user-report"]
+    "tags": ["slow", "user-report"],
+    "reference": "系统突然变慢且用户反馈页面打不开，根因可能是流量突增或后端资源不足。建议：1）检查流量监控确认是否有流量突增；2）查看CPU/内存/磁盘等资源使用率；3）检查后端服务响应时间和错误率；4）必要时紧急扩容或启用限流策略。"
   },
   {
     "id": "TC017",
@@ -167,7 +183,8 @@
     "expected_root_causes": ["CodeBug", "发布引入缺陷", "配置错误"],
     "expected_docs": ["service_unavailable.md"],
     "expected_answer_contains": ["发布", "回滚"],
-    "tags": ["deploy", "error"]
+    "tags": ["deploy", "error"],
+    "reference": "昨晚上线后今天早上开始报错且错误数递增，根因高度怀疑是发布引入的缺陷或配置错误。建议：1）对比发布前后的代码变更和配置差异；2）立即执行代码回滚止血；3）分析错误日志确认具体的异常类型；4）回滚后在预发环境复现和修复问题。"
   },
   {
     "id": "TC018",
@@ -177,7 +194,8 @@
     "expected_root_causes": ["Flapping", "资源竞争", "GC停顿"],
     "expected_docs": ["service_unavailable.md"],
     "expected_answer_contains": ["间歇性", "不稳定"],
-    "tags": ["flapping", "intermittent"]
+    "tags": ["flapping", "intermittent"],
+    "reference": "服务间歇性不稳定（时好时坏），根因可能是资源竞争、GC停顿或后端节点部分异常。建议：1）检查是否存在GC停顿导致短暂不可用；2）确认多节点负载均衡是否有个别节点异常；3）排查是否存在资源（CPU/内存/连接池）竞争；4）检查依赖服务是否存在间歇性故障。"
   },
   {
     "id": "TC019",
@@ -187,7 +205,8 @@
     "expected_root_causes": ["MemoryLeak", "内存泄漏", "对象未释放"],
     "expected_docs": ["memory_high_usage.md"],
     "expected_answer_contains": ["内存泄漏", "重启"],
-    "tags": ["memory", "leak"]
+    "tags": ["memory", "leak"],
+    "reference": "内存持续增长且需要定期重启，这是典型的内存泄漏症状。建议：1）使用内存分析工具（jmap、MAT）定位泄漏对象；2）检查是否有集合类对象持续增长未清理；3）排查事件监听器、数据库连接等是否正确释放；4）短期可通过定时重启缓解，长期需修复泄漏点。"
   },
   {
     "id": "TC020",
@@ -197,7 +216,8 @@
     "expected_root_causes": ["CascadeFailure", "级联故障"],
     "expected_docs": ["cpu_high_usage.md", "memory_high_usage.md"],
     "expected_answer_contains": ["告警", "排查"],
-    "tags": ["cascade", "multiple"]
+    "tags": ["cascade", "multiple"],
+    "reference": "多告警并发通常是级联故障的表现，需要找到根因告警。建议：1）按告警时间排序，找到最早触发的告警作为排查起点；2）利用知识图谱分析告警之间的因果关系；3）优先处理影响面最大的根因问题；4）暂时抑制级联告警，聚焦根因修复。"
   },
   {
     "id": "TC021",
@@ -207,7 +227,8 @@
     "expected_root_causes": ["AutoscaleFlapping", "扩容策略不当", "指标误判"],
     "expected_docs": [],
     "expected_answer_contains": ["扩容", "自动"],
-    "tags": ["autoscale", "night"]
+    "tags": ["autoscale", "night"],
+    "reference": "凌晨自动扩容但CPU不高，根因可能是自动扩容策略配置不当或监控指标误判。建议：1）检查自动扩容的触发指标和阈值配置；2）确认是否因内存、网络等非CPU指标触发；3）调整扩容冷却时间防止频繁扩缩；4）检查监控数据是否有抖动或毛刺。"
   },
   {
     "id": "TC022",
@@ -217,7 +238,8 @@
     "expected_root_causes": ["ConnectionReset", "网络抖动", "后端重启"],
     "expected_docs": ["slow_response.md"],
     "expected_answer_contains": ["连接", "超时"],
-    "tags": ["timeout", "intermittent"]
+    "tags": ["timeout", "intermittent"],
+    "reference": "接口偶尔超时且出现connection reset，根因可能是网络抖动、后端服务重启或连接被中间件（如Nginx/LB）主动断开。建议：1）检查后端服务是否有重启记录；2）排查网络设备是否存在连接超时配置过短；3）调整HTTP keep-alive超时参数；4）增加客户端重试逻辑。"
   },
   {
     "id": "TC023",
@@ -227,7 +249,8 @@
     "expected_root_causes": ["MemoryPressure", "内存不足", "缓存过大"],
     "expected_docs": ["memory_high_usage.md"],
     "expected_answer_contains": ["内存", "缓存"],
-    "tags": ["memory", "threshold"]
+    "tags": ["memory", "threshold"],
+    "reference": "内存长期在80%附近徘徊偶尔飙到95%，说明存在内存压力但不一定是泄漏。建议：1）检查缓存大小配置是否合理，适当减小缓存；2）确认是否可以增加内存配额；3）优化内存使用，减少不必要的对象缓存；4）调整告警阈值或设置分级告警。"
   },
   {
     "id": "TC024",
@@ -237,7 +260,8 @@
     "expected_root_causes": ["ReplicationLag", "主从延迟", "大事务"],
     "expected_docs": [],
     "expected_answer_contains": ["主从", "延迟"],
-    "tags": ["database", "replication"]
+    "tags": ["database", "replication"],
+    "reference": "数据库主从延迟持续增大导致读请求数据不一致，根因通常是大事务或从库性能不足。建议：1）检查主库是否存在大事务或批量写入；2）确认从库硬件性能和IO是否有瓶颈；3）检查网络带宽是否影响binlog传输；4）关键读请求临时路由到主库。"
   },
   {
     "id": "TC025",
@@ -247,7 +271,8 @@
     "expected_root_causes": ["UpstreamTimeout", "上游超时", "后端阻塞"],
     "expected_docs": ["slow_response.md"],
     "expected_answer_contains": ["502", "上游"],
-    "tags": ["nginx", "502"]
+    "tags": ["nginx", "502"],
+    "reference": "API返回502且Nginx显示upstream timed out，说明后端服务处理超时。建议：1）检查后端服务响应时间和负载状态；2）排查是否有慢查询或阻塞操作导致处理时间过长；3）适当调大Nginx的proxy_read_timeout；4）优化后端处理逻辑或增加实例数。"
   },
   {
     "id": "TC026",
@@ -257,7 +282,8 @@
     "expected_root_causes": ["ConsumerRebalance", "消费者重平衡", "心跳超时"],
     "expected_docs": [],
     "expected_answer_contains": ["Kafka", "消费"],
-    "tags": ["kafka", "deploy"]
+    "tags": ["kafka", "deploy"],
+    "reference": "部署新版本后Kafka消费组频繁rebalance，根因通常是消费者重启导致心跳超时或session.timeout过短。建议：1）采用滚动部署减少消费者同时下线；2）适当增大session.timeout.ms和heartbeat.interval.ms；3）检查消费者处理耗时是否超过max.poll.interval.ms；4）确认分区分配策略是否合理。"
   },
   {
     "id": "TC027",
@@ -267,7 +293,8 @@
     "expected_root_causes": ["SlowWarmup", "预热慢", "缓存未命中"],
     "expected_docs": ["service_unavailable.md"],
     "expected_answer_contains": ["预热", "启动"],
-    "tags": ["warmup", "startup"]
+    "tags": ["warmup", "startup"],
+    "reference": "服务重启后恢复慢，根因通常是缓存预热耗时长或JIT编译未完成。建议：1）实现启动时主动预热关键缓存数据；2）使用预热脚本在服务上线前加载热点数据；3）逐步放量而非重启后立即全量接流；4）优化启动加载逻辑，延迟加载非关键资源。"
   },
   {
     "id": "TC028",
@@ -277,7 +304,8 @@
     "expected_root_causes": ["OOMKilled", "内存超限", "cgroup限制"],
     "expected_docs": ["memory_high_usage.md"],
     "expected_answer_contains": ["OOM", "内存"],
-    "tags": ["oom", "killed"]
+    "tags": ["oom", "killed"],
+    "reference": "OOM Killer终止进程，说明进程使用的物理内存超过了系统或cgroup限制。建议：1）检查dmesg日志确认OOM事件详情；2）确认容器/cgroup的内存限制是否合理；3）排查内存泄漏或突发内存占用；4）适当调整内存限制或优化内存使用。"
   },
   {
     "id": "TC029",
@@ -287,7 +315,8 @@
     "expected_root_causes": ["ConnectionLeak", "连接泄漏", "短连接过多"],
     "expected_docs": [],
     "expected_answer_contains": ["连接", "TCP"],
-    "tags": ["tcp", "connection"]
+    "tags": ["tcp", "connection"],
+    "reference": "TCP连接数暴增且大量TIME_WAIT，根因通常是短连接过多或连接未正确复用。建议：1）启用HTTP keep-alive复用连接；2）调整内核参数（net.ipv4.tcp_tw_reuse）加速TIME_WAIT回收；3）检查客户端是否存在连接泄漏；4）使用连接池减少频繁建立和断开连接。"
   },
   {
     "id": "TC030",
@@ -297,7 +326,8 @@
     "expected_root_causes": ["DataGrowth", "数据量增长", "索引缺失"],
     "expected_docs": ["slow_response.md"],
     "expected_answer_contains": ["定时任务", "慢"],
-    "tags": ["cron", "slow"]
+    "tags": ["cron", "slow"],
+    "reference": "定时任务执行时间逐渐变长，根因通常是数据量增长导致处理耗时增加。建议：1）检查任务涉及的数据表数据量增长情况；2）排查是否缺少必要的数据库索引；3）优化批处理逻辑，增加分页或分批处理；4）考虑数据归档策略减少处理数据量。"
   },
   {
     "id": "TC031",
@@ -307,7 +337,8 @@
     "expected_root_causes": ["GCPause", "GC停顿", "STW"],
     "expected_docs": ["memory_high_usage.md", "slow_response.md"],
     "expected_answer_contains": ["GC", "停顿"],
-    "tags": ["gc", "stw", "hidden"]
+    "tags": ["gc", "stw", "hidden"],
+    "reference": "系统偶尔卡顿几秒后恢复且常规监控无异常，高度怀疑是JVM的Full GC导致的STW（Stop-The-World）停顿。建议：1）开启GC日志（-Xlog:gc*）分析GC频率和停顿时间；2）检查是否发生Full GC，分析触发原因；3）调优GC参数或切换GC算法（如G1/ZGC）；4）增大堆内存减少GC频率。"
   },
   {
     "id": "TC032",
@@ -317,7 +348,8 @@
     "expected_root_causes": ["PartialFailure", "部分节点异常", "负载不均"],
     "expected_docs": ["service_unavailable.md"],
     "expected_answer_contains": ["部分", "节点"],
-    "tags": ["partial", "inconsistent"]
+    "tags": ["partial", "inconsistent"],
+    "reference": "部分请求成功部分失败但本地日志无错误，说明可能是多节点环境中个别节点异常。建议：1）检查负载均衡后的各节点状态，逐个排查；2）确认是否存在网络层面的部分丢包；3）检查CDN或缓存层是否有脏数据；4）在每个节点上添加请求级别的日志追踪。"
   },
   {
     "id": "TC033",
@@ -327,7 +359,8 @@
     "expected_root_causes": ["ExternalChange", "外部依赖变化", "数据增长"],
     "expected_docs": ["slow_response.md"],
     "expected_answer_contains": ["外部", "变化"],
-    "tags": ["mysterious", "no-change"]
+    "tags": ["mysterious", "no-change"],
+    "reference": "无代码变更但性能突然下降，根因可能是外部因素变化。建议：1）检查外部依赖服务是否有变更或性能下降；2）排查数据量增长是否导致查询变慢；3）确认基础设施（网络/存储）是否有变化；4）检查是否有新的定时任务或批处理作业影响性能。"
   },
   {
     "id": "TC034",
@@ -337,7 +370,8 @@
     "expected_root_causes": ["SilentDegradation", "依赖降级", "证书问题"],
     "expected_docs": ["service_unavailable.md"],
     "expected_answer_contains": ["错误率", "依赖"],
-    "tags": ["error-rate", "sudden"]
+    "tags": ["error-rate", "sudden"],
+    "reference": "流量未变但错误率突然升高，根因可能是依赖服务降级或证书过期等外部因素。建议：1）检查所有下游依赖服务的可用性和响应时间；2）确认SSL/TLS证书是否过期或被吊销；3）排查DNS解析是否正常；4）检查配置中心是否有配置变更推送。"
   },
   {
     "id": "TC035",
@@ -347,7 +381,8 @@
     "expected_root_causes": ["ScheduledJob", "定时任务冲突", "备份作业"],
     "expected_docs": ["slow_response.md"],
     "expected_answer_contains": ["定时", "时间"],
-    "tags": ["periodic", "scheduled"]
+    "tags": ["periodic", "scheduled"],
+    "reference": "每天固定时间段性能抖动，高度怀疑是定时任务或备份作业导致资源争用。建议：1）检查该时间段是否有crontab定时任务在运行；2）确认数据库备份、日志归档等运维作业的执行时间；3）将重负载定时任务调整到业务低峰期；4）对定时任务进行资源限制（cgroup/nice）。"
   },
   {
     "id": "TC036",
@@ -357,7 +392,8 @@
     "expected_root_causes": ["CrossDCLatency", "跨机房延迟", "网络路由"],
     "expected_docs": [],
     "expected_answer_contains": ["机房", "网络"],
-    "tags": ["multi-dc", "network"]
+    "tags": ["multi-dc", "network"],
+    "reference": "服务在A机房正常但B机房超时，根因可能是跨机房网络延迟或B机房的基础设施问题。建议：1）检查A/B机房之间的网络延迟和丢包率；2）确认B机房的服务配置是否与A机房一致；3）排查B机房是否存在DNS或网络路由问题；4）考虑将B机房的依赖服务就近部署。"
   },
   {
     "id": "TC037",
@@ -367,7 +403,8 @@
     "expected_root_causes": ["MemoryLeak", "对象泄漏", "大对象残留"],
     "expected_docs": ["memory_high_usage.md"],
     "expected_answer_contains": ["GC", "泄漏"],
-    "tags": ["gc", "heap", "advanced"]
+    "tags": ["gc", "heap", "advanced"],
+    "reference": "Full GC后内存未释放且堆中充满byte数组，说明存在严重的内存泄漏。建议：1）使用jmap导出堆转储文件（heap dump）；2）用MAT/VisualVM分析大对象的引用链路；3）检查是否有流（InputStream/OutputStream）未正确关闭；4）排查缓存或池化对象是否正确回收。"
   },
   {
     "id": "TC038",
@@ -377,7 +414,8 @@
     "expected_root_causes": ["SilentFailure", "静默失败", "超时降级"],
     "expected_docs": [],
     "expected_answer_contains": ["空响应", "中间服务"],
-    "tags": ["silent", "empty-response"]
+    "tags": ["silent", "empty-response"],
+    "reference": "中间服务返回200但响应体为空，属于静默失败。根因可能是服务内部异常被catch后返回空结果，或触发了超时降级逻辑。建议：1）检查中间服务的内部错误处理逻辑；2）确认是否有降级/熔断策略返回空响应而非错误码；3）在中间服务添加详细的响应日志和指标；4）通过分布式追踪定位异常节点。"
   },
   {
     "id": "TC039",
@@ -387,7 +425,8 @@
     "expected_root_causes": ["LivenessProbe", "探针配置不当", "启动超时"],
     "expected_docs": ["service_unavailable.md"],
     "expected_answer_contains": ["Pod", "探针"],
-    "tags": ["k8s", "restart"]
+    "tags": ["k8s", "restart"],
+    "reference": "Pod不断重启但无OOM事件，根因通常是LivenessProbe健康检查失败或启动超时。建议：1）检查Pod的livenessProbe配置（路径、超时、重试次数）；2）增大initialDelaySeconds给服务足够的启动时间；3）确认探针检测的端点是否正确可达；4）查看kubectl describe pod的Events确认具体的重启原因。"
   },
   {
     "id": "TC040",
@@ -397,7 +436,8 @@
     "expected_root_causes": ["ThreadLeak", "线程泄漏", "阻塞IO"],
     "expected_docs": ["cpu_high_usage.md"],
     "expected_answer_contains": ["线程", "阻塞"],
-    "tags": ["thread", "leak"]
+    "tags": ["thread", "leak"],
+    "reference": "线程数持续增长但CPU不高，说明存在线程泄漏，大量线程处于阻塞/等待状态。建议：1）使用jstack导出线程栈分析阻塞点；2）检查是否有线程池配置不当（无界队列）；3）排查IO操作是否设置了合理的超时时间；4）确认线程池是否正确关闭和回收。"
   },
   {
     "id": "TC041",
@@ -407,7 +447,8 @@
     "expected_root_causes": [],
     "expected_docs": [],
     "expected_answer_contains": [],
-    "tags": ["unknown", "edge"]
+    "tags": ["unknown", "edge"],
+    "reference": "这是一个超出运维知识库范围的问题（量子计算领域）。系统无法提供有效的诊断和处置建议，建议咨询量子计算领域的专业人员。"
   },
   {
     "id": "TC042",
@@ -417,7 +458,8 @@
     "expected_root_causes": [],
     "expected_docs": [],
     "expected_answer_contains": ["显存", "GPU"],
-    "tags": ["gpu", "edge"]
+    "tags": ["gpu", "edge"],
+    "reference": "GPU显存溢出（CUDA out of memory），虽然不在核心运维知识库范围，但建议：1）减小batch size降低显存占用；2）使用混合精度训练（fp16）；3）检查模型是否有不必要的中间变量未释放；4）考虑使用梯度累积或模型并行。"
   },
   {
     "id": "TC043",
@@ -427,7 +469,8 @@
     "expected_root_causes": [],
     "expected_docs": [],
     "expected_answer_contains": [],
-    "tags": ["blockchain", "edge"]
+    "tags": ["blockchain", "edge"],
+    "reference": "这是一个超出运维知识库范围的问题（区块链领域）。区块链节点同步落后可能与网络带宽、磁盘IO或节点配置有关，建议咨询区块链运维专家。"
   },
   {
     "id": "TC044",
@@ -437,7 +480,8 @@
     "expected_root_causes": [],
     "expected_docs": [],
     "expected_answer_contains": [],
-    "tags": ["iot", "edge"]
+    "tags": ["iot", "edge"],
+    "reference": "这是一个超出运维知识库范围的问题（IoT领域）。IoT设备心跳丢失可能与网络连通性、设备电量或固件问题有关，建议咨询IoT平台运维团队。"
   },
   {
     "id": "TC045",
@@ -447,6 +491,7 @@
     "expected_root_causes": [],
     "expected_docs": [],
     "expected_answer_contains": ["CDN", "缓存"],
-    "tags": ["cdn", "edge"]
+    "tags": ["cdn", "edge"],
+    "reference": "CDN缓存命中率骤降至10%，虽然不在核心运维知识库范围，但可能原因包括：1）缓存配置变更导致大量缓存失效；2）新版本发布导致URL变化；3）热点内容变化；4）建议检查CDN缓存策略和近期变更。"
   }
 ]

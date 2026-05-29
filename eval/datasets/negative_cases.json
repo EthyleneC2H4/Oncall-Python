@@ -6,7 +6,8 @@
     "expected_intent": "CHITCHAT",
     "expected_root_causes": [],
     "expected_docs": [],
-    "tags": ["greeting"]
+    "tags": ["greeting"],
+    "reference": "你好！我是智能运维助手 SuperBizAgent，专注于运维故障诊断、告警分析和处置建议。有什么运维问题可以帮你分析的吗？"
   },
   {
     "id": "NEG002",
@@ -15,7 +16,8 @@
     "expected_intent": "CHITCHAT",
     "expected_root_causes": [],
     "expected_docs": [],
-    "tags": ["weather"]
+    "tags": ["weather"],
+    "reference": "这不是一个运维相关的问题。我是运维助手，专注于故障诊断和告警分析，无法提供天气信息。请问有什么运维问题需要帮助吗？"
   },
   {
     "id": "NEG003",
@@ -24,7 +26,8 @@
     "expected_intent": "CHITCHAT",
     "expected_root_causes": [],
     "expected_docs": [],
-    "tags": ["creative"]
+    "tags": ["creative"],
+    "reference": "这不是一个运维相关的问题。我是运维助手，专注于故障诊断和告警分析，无法提供创意写作服务。请问有什么运维问题需要帮助吗？"
   },
   {
     "id": "NEG004",
@@ -33,7 +36,8 @@
     "expected_intent": "CHITCHAT",
     "expected_root_causes": [],
     "expected_docs": [],
-    "tags": ["math"]
+    "tags": ["math"],
+    "reference": "这不是一个运维相关的问题。1+1=2。我是运维助手，专注于故障诊断和告警分析。请问有什么运维问题需要帮助吗？"
   },
   {
     "id": "NEG005",
@@ -42,7 +46,8 @@
     "expected_intent": "CHITCHAT",
     "expected_root_causes": [],
     "expected_docs": [],
-    "tags": ["recommendation"]
+    "tags": ["recommendation"],
+    "reference": "这不是一个运维相关的问题。我是运维助手，专注于故障诊断和告警分析，无法提供电影推荐。请问有什么运维问题需要帮助吗？"
   },
   {
     "id": "NEG006",
@@ -51,7 +56,8 @@
     "expected_intent": "KNOWLEDGE",
     "expected_root_causes": [],
     "expected_docs": [],
-    "tags": ["concept"]
+    "tags": ["concept"],
+    "reference": "向量数据库是专门用于存储和检索高维向量数据的数据库系统，常用于相似性搜索场景，如推荐系统、图像检索、自然语言处理等。常见的向量数据库有Milvus、Pinecone、Weaviate等。"
   },
   {
     "id": "NEG007",
@@ -60,7 +66,8 @@
     "expected_intent": "KNOWLEDGE",
     "expected_root_causes": [],
     "expected_docs": [],
-    "tags": ["howto"]
+    "tags": ["howto"],
+    "reference": "Milvus索引参数配置需要根据数据规模和查询需求选择合适的索引类型。常见索引如IVF_FLAT（精确度高）、IVF_SQ8（压缩存储）、HNSW（高查询速度），关键参数包括nlist（聚类数）、nprobe（搜索的聚类数）等。"
   },
   {
     "id": "NEG008",
@@ -69,7 +76,8 @@
     "expected_intent": "KNOWLEDGE",
     "expected_root_causes": [],
     "expected_docs": [],
-    "tags": ["algorithm"]
+    "tags": ["algorithm"],
+    "reference": "BM25是一种基于概率的信息检索排名函数，通过词频（TF）、逆文档频率（IDF）和文档长度归一化来计算查询与文档的相关性得分。它是TF-IDF的改进版本，引入了饱和参数k1和长度归一化参数b。"
   },
   {
     "id": "NEG009",
@@ -78,7 +86,8 @@
     "expected_intent": "KNOWLEDGE",
     "expected_root_causes": [],
     "expected_docs": [],
-    "tags": ["deploy"]
+    "tags": ["deploy"],
+    "reference": "部署Docker容器的基本步骤：1）编写Dockerfile定义镜像构建规则；2）使用docker build构建镜像；3）使用docker run运行容器，指定端口映射、环境变量和数据卷；4）生产环境建议使用Docker Compose或Kubernetes进行编排管理。"
   },
   {
     "id": "NEG010",
@@ -87,6 +96,7 @@
     "expected_intent": "KNOWLEDGE",
     "expected_root_causes": [],
     "expected_docs": [],
-    "tags": ["comparison"]
+    "tags": ["comparison"],
+    "reference": "Docker Compose适合单机多容器编排，配置简单，适合开发和小规模部署。Kubernetes是分布式容器编排平台，支持自动扩缩容、服务发现、负载均衡、滚动更新等，适合大规模生产环境。主要区别在于规模、复杂度和功能丰富程度。"
   }
 ]
