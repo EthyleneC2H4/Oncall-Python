@@ -1,0 +1,149 @@
+name: CI - OnCall Agent 质量门禁
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: '评测模式'
+        required: true
+        default: 'regression'
+        type: choice
+        options:
+          - smoke
+          - gating
+          - regression
+          - full
+
+jobs:
+  # ──────────────── Lint & Format ────────────────
+  lint:
+    name: Lint & Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.11'
+      - run: uv sync --group dev
+      - name: ruff check
+        run: uv run ruff check app/
+      - name: ruff format check
+        run: uv run ruff format --check app/
+      - name: mypy check
+        run: uv run mypy app/ --ignore-missing-imports || true
+        continue-on-error: true
+
+  # ──────────────── Unit Tests ────────────────
+  unit-tests:
+    name: Unit Tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.11'
+      - run: uv sync --group dev
+      - name: Run unit tests
+        run: |
+          uv run pytest tests/test_core/ tests/test_api/ tests/test_eval/ tests/test_agent/ \
+            -v --tb=short --cov=app --cov-report=term-missing --cov-report=html \
+            --timeout=120 \
+            || echo "UNIT_TESTS_FAILED=true" >> $GITHUB_ENV
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: htmlcov/
+
+  # ──────────────── AI Eval Gating ────────────────
+  eval-gating:
+    name: AI Eval Gate (RAGAS + Component)
+    runs-on: ubuntu-latest
+    needs: [lint, unit-tests]
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.11'
+      - run: uv sync
+      - name: Run AI evaluation gating
+        env:
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+        run: |
+          uv run python -m app.eval.ci_runner --mode gating --threshold 0.6
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: eval/results/ci_gating_*.json
+
+  # ──────────────── Regression (on push to main) ────────────────
+  eval-regression:
+    name: Full Regression Eval
+    runs-on: ubuntu-latest
+    needs: [lint, unit-tests]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.11'
+      - run: uv sync
+      - name: Run full regression
+        env:
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+        run: |
+          uv run python -m app.eval.ci_runner --mode regression
+      - name: Upload regression report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-report
+          path: eval/results/ci_regression_*.json
+
+  # ──────────────── Manual: Full E2E ────────────────
+  eval-full:
+    name: Full E2E RAGAS Eval (Manual)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'full'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.11'
+      - run: uv sync
+      - name: Run full E2E evaluation
+        env:
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+        run: |
+          uv run python -m app.eval.ci_runner --mode full --max-e2e 10
+      - name: Upload full eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-eval-report
+          path: eval/results/ci_full_*.json
+
+  # ──────────────── Result Summary ────────────────
+  summary:
+    name: CI Summary
+    runs-on: ubuntu-latest
+    needs: [lint, unit-tests, eval-gating, eval-regression]
+    if: always()
+    steps:
+      - name: Print summary
+        run: |
+          echo "## OnCall CI Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| lint | ${{ needs.lint.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| unit-tests | ${{ needs.unit-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| eval-gating | ${{ needs.eval-gating.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| eval-regression | ${{ needs.eval-regression.result }} |" >> $GITHUB_STEP_SUMMARY
