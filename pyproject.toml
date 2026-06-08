@@ -36,6 +36,7 @@ dependencies = [
     "pyyaml>=6.0",
     "ragas>=0.2.0",
     "datasets>=2.14.0",
+    "deepeval>=2.0.0",
 ]
 
 [project.optional-dependencies]
