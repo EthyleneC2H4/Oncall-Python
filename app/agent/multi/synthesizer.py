@@ -1,16 +1,17 @@
 """Synthesizer — 汇总多 Agent 发现，交叉验证，生成结构化报告"""
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_qwq import ChatQwen
 from loguru import logger
 
 from app.config import config
+from app.core.llm_factory import LLMFactory
 
 
 def _get_synthesis_prompt() -> str:
     """获取 Synthesizer Prompt，优先从版本化管理器加载"""
     try:
         from app.core.prompt_manager import prompt_manager
+
         template = prompt_manager.get("synthesizer")
         if template:
             return template.content
@@ -51,9 +52,9 @@ class Synthesizer:
     """汇总器：融合多 Agent 发现，交叉验证，生成报告"""
 
     def __init__(self):
-        self.llm = ChatQwen(
+        self.llm = LLMFactory.create_chat_model(
+            streaming=False,
             model=config.rag_model,
-            api_key=config.dashscope_api_key,
             temperature=0,
         )
 
@@ -111,7 +112,7 @@ class Synthesizer:
 
             response = await self.llm.ainvoke(messages)
             logger.info("Synthesizer 报告生成完成")
-            return response.content
+            return str(response.content)
 
         except Exception as e:
             logger.error(f"Synthesizer 汇总失败: {e}")

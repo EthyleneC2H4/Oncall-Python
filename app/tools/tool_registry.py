@@ -4,9 +4,7 @@
 调用前进行权限校验和参数验证。
 """
 
-import time
-from enum import Enum
-from typing import Any
+from enum import StrEnum
 
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -14,16 +12,18 @@ from pydantic import BaseModel, Field
 from app.core.audit import audit_logger
 
 
-class RiskLevel(str, Enum):
+class RiskLevel(StrEnum):
     """工具风险等级"""
-    READ_ONLY = "read_only"             # 只读操作，直接执行
-    READ_AUDIT = "read_audit"           # 只读但需审计
-    WRITE_LOW = "write_low"             # 低风险写操作
+
+    READ_ONLY = "read_only"  # 只读操作，直接执行
+    READ_AUDIT = "read_audit"  # 只读但需审计
+    WRITE_LOW = "write_low"  # 低风险写操作
     WRITE_HIGH_RISK = "write_high_risk"  # 高风险写操作，需人工确认
 
 
 class ToolMeta(BaseModel):
     """工具元信息"""
+
     name: str
     risk_level: RiskLevel = RiskLevel.READ_ONLY
     description: str = ""
@@ -55,7 +55,6 @@ _TOOL_REGISTRY: dict[str, ToolMeta] = {
         risk_level=RiskLevel.READ_ONLY,
         description="告警级联预测",
     ),
-
     # MCP: CLS 工具
     "search_log": ToolMeta(
         name="search_log",
@@ -89,7 +88,6 @@ _TOOL_REGISTRY: dict[str, ToolMeta] = {
         risk_level=RiskLevel.READ_ONLY,
         description="获取日志直方图",
     ),
-
     # MCP: Monitor 工具
     "query_cpu_metrics": ToolMeta(
         name="query_cpu_metrics",
@@ -103,7 +101,6 @@ _TOOL_REGISTRY: dict[str, ToolMeta] = {
         description="查询内存指标",
         audit=True,
     ),
-
     # 未来高风险工具（预留）
     "restart_instance": ToolMeta(
         name="restart_instance",
@@ -135,7 +132,8 @@ class ToolRegistry:
 
     def get(self, name: str) -> ToolMeta | None:
         """获取工具元信息"""
-        return self._registry.get(name)
+        meta: ToolMeta | None = self._registry.get(name)
+        return meta
 
     def check_permission(self, tool_name: str) -> tuple[bool, str]:
         """检查工具调用权限

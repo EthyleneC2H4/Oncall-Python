@@ -6,7 +6,6 @@
 """
 
 import re
-from typing import Optional
 
 from loguru import logger
 
@@ -20,13 +19,17 @@ class InputGuard:
         r"你现在是",
         r"你的新角色是",
         r"(?:忘记|忽略|无视).*(?:系统|角色|指令)",
+        r"系统提示词.{0,8}(?:修改|篡改|覆盖|重写)",
+        r"不受.{0,4}(?:限制|约束)",
+        r"越狱",
         r"system\s*:",
         r"<\s*system\s*>",
-        r"ignore\s+(?:previous|above|all)\s+instructions?",
+        r"ignore\s+(?:all\s+)?(?:previous|above)\s+instructions?",
         r"you\s+are\s+now",
         r"new\s+(?:role|persona|identity)",
         r"forget\s+(?:everything|all|your)",
         r"pretend\s+(?:you|to\s+be)",
+        r"developer\s+mode",
         r"jailbreak",
         r"DAN\s+mode",
         r"\[SYSTEM\]",
@@ -45,7 +48,7 @@ class InputGuard:
         self._injection_re = [re.compile(p, re.IGNORECASE) for p in self.INJECTION_PATTERNS]
         self._pii_re = {k: re.compile(p) for k, p in self.PII_PATTERNS.items()}
 
-    def check_injection(self, text: str) -> Optional[str]:
+    def check_injection(self, text: str) -> str | None:
         """检测 Prompt 注入
 
         Returns:
@@ -79,7 +82,9 @@ class InputGuard:
             if pii_type == "phone":
                 result = re.sub(pattern, lambda m: m.group()[:3] + "****" + m.group()[-4:], result)
             elif pii_type == "id_card":
-                result = re.sub(pattern, lambda m: m.group()[:6] + "********" + m.group()[-4:], result)
+                result = re.sub(
+                    pattern, lambda m: m.group()[:6] + "********" + m.group()[-4:], result
+                )
             elif pii_type == "email":
                 result = re.sub(
                     self.PII_PATTERNS["email"],
@@ -87,7 +92,9 @@ class InputGuard:
                     result,
                 )
             elif pii_type == "bank_card":
-                result = re.sub(pattern, lambda m: m.group()[:4] + " **** **** " + m.group()[-4:], result)
+                result = re.sub(
+                    pattern, lambda m: m.group()[:4] + " **** **** " + m.group()[-4:], result
+                )
         return result
 
     def validate(self, text: str) -> tuple[bool, str, str]:
@@ -103,6 +110,7 @@ class InputGuard:
         injection = self.check_injection(text)
         if injection:
             from app.core.audit import audit_logger
+
             audit_logger.log_request(
                 request_id="input_guard",
                 intent="BLOCKED",

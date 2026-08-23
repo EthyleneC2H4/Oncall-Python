@@ -35,6 +35,7 @@ from app.core.degradation import DegradationLevel
 
 class AgentFinding(BaseModel):
     """单个 Agent 的发现"""
+
     agent_name: str
     findings: str
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
@@ -44,6 +45,7 @@ class AgentFinding(BaseModel):
 
 class DiagnosisResult(BaseModel):
     """并行诊断汇总结果"""
+
     alert_input: str
     agent_findings: list[AgentFinding]
     synthesized_report: str
@@ -64,7 +66,7 @@ async def run_parallel_diagnosis(alert_input: str) -> DiagnosisResult:
     Returns:
         DiagnosisResult: 汇总诊断结果
     """
-    logger.info(f"=== 多 Agent 并行诊断启动 ===")
+    logger.info("=== 多 Agent 并行诊断启动 ===")
     logger.info(f"输入: {alert_input}")
     start_time = time.time()
 
@@ -129,18 +131,17 @@ async def run_diagnosis_with_degradation(alert_input: str) -> DiagnosisResult:
 
         # 仅 1 个 Agent 成功，标记降级
         result.degradation_level = DegradationLevel.SINGLE_AGENT.value
-        logger.warning(
-            f"多 Agent 仅 {result.agents_succeeded} 个成功，标记为降级"
-        )
+        logger.warning(f"多 Agent 仅 {result.agents_succeeded} 个成功，标记为降级")
         return result
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error("多 Agent 诊断超时 (120s)")
     except Exception as e:
         logger.error(f"多 Agent 诊断异常: {e}")
 
     # 降级兜底：使用 RAG 检索
     from app.tools.knowledge_tool import retrieve_with_degradation
+
     try:
         ctx, docs, deg_level = await retrieve_with_degradation(alert_input)
         report = f"# 降级诊断结果\n\n多 Agent 诊断不可用，以下为 RAG 检索结果：\n\n{ctx}"
@@ -155,7 +156,7 @@ async def run_diagnosis_with_degradation(alert_input: str) -> DiagnosisResult:
         total_duration_ms=0.0,
         agents_succeeded=0,
         agents_failed=0,
-        degradation_level=deg_level.value if hasattr(deg_level, 'value') else str(deg_level),
+        degradation_level=deg_level.value if hasattr(deg_level, "value") else str(deg_level),
     )
 
 

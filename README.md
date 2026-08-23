@@ -20,10 +20,11 @@
 ## 🛠️ 技术栈
 
 - **框架**: FastAPI + LangChain + LangGraph
-- **LLM**: 阿里云 DashScope (Qwen-Max)
+- **LLM**: OpenRouter（OpenAI 兼容端点，默认 NVIDIA Nemotron 3.5 Lightning）
 - **向量库**: Milvus (IVF_FLAT / L2)
+- **Embedding**: 本地 BGE (BAAI/bge-large-zh-v1.5, sentence-transformers)
 - **稀疏检索**: BM25 (rank_bm25 + jieba)
-- **重排**: DashScope gte-rerank (Cross-Encoder)
+- **重排**: 本地 BGE Reranker (BAAI/bge-reranker-base, Cross-Encoder)
 - **知识图谱**: NetworkX (DiGraph)
 - **工具协议**: MCP (Model Context Protocol)
 - **前端**: 原生 HTML/CSS/JS + vis-network (图谱可视化)
@@ -32,7 +33,7 @@
 
 ### 环境要求
 - Python 3.10+
-- 阿里云 DashScope API Key ([获取地址](https://dashscope.aliyun.com/))
+- [OpenRouter](https://openrouter.ai/) API Key ([获取地址](https://openrouter.ai/settings/keys))
 
 ### 安装和启动
 
@@ -54,7 +55,7 @@ uv pip install -e .
 pip install -e .
 
 # 3. 编辑配置文件
-# 首次使用需要编辑 .env 文件，填入你的 DASHSCOPE_API_KEY
+# 首次使用需要编辑 .env 文件，填入你的 OPENROUTER_API_KEY
 vim .env  # 或使用其他编辑器
 
 # 4. 一键初始化（启动 Docker + 服务 + 上传文档）
@@ -89,7 +90,7 @@ python -m venv .venv
 pip install -e .
 
 # 3. 编辑配置文件
-# 使用记事本或其他编辑器打开 .env 文件，填入你的 DASHSCOPE_API_KEY
+# 使用记事本或其他编辑器打开 .env 文件，填入你的 OPENROUTER_API_KEY
 notepad .env
 
 # 4. 启动 Docker Desktop
@@ -198,11 +199,11 @@ Oncall-Python/
 │   │   ├── query_router.py                 #   查询意图分类与路由（4 类意图）
 │   │   ├── query_rewriter.py               #   LLM 查询改写（口语化→规范化）
 │   │   ├── bm25_retriever.py               #   BM25 稀疏检索（jieba + rank_bm25）
-│   │   ├── reranker.py                     #   Rerank 精排（DashScope gte-rerank）
+│   │   ├── reranker.py                     #   Rerank 精排（本地 bge-reranker）
 │   │   ├── context_assembler.py            #   动态上下文组装（Token 优先级）
 │   │   ├── document_splitter_service.py    #   结构感知分块 + Parent-Child 双层索引
 │   │   ├── vector_store_manager.py         #   Milvus 向量存储管理
-│   │   ├── vector_embedding_service.py     #   DashScope 嵌入服务
+│   │   ├── vector_embedding_service.py     #   本地 BGE 嵌入服务
 │   │   ├── vector_index_service.py         #   文档索引服务
 │   │   └── vector_search_service.py        #   语义搜索服务
 │   ├── agent/                              # Agent 模块
@@ -254,11 +255,9 @@ Oncall-Python/
 通过 `.env` 文件配置：
 
 ```bash
-# 阿里云LLM DashScope 配置（必填）
-# 秘钥管理： https://bailian.console.aliyun.com/cn-beijing/?spm=5176.29597918.J_SEsSjsNv72yRuRFS2VknO.2.61ac133ccTVQLw&tab=demohouse#/api-key
-DASHSCOPE_API_KEY=your-api-key （配置你自己的秘钥）
-DASHSCOPE_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1  # 不配置则默认会使用新加坡站点
-DASHSCOPE_MODEL=qwen-max
+# LLM 接入（必填）：通过 OpenRouter 的 OpenAI 兼容端点调用
+# Key 管理：https://openrouter.ai/settings/keys （建议设置消费上限并定期轮换）
+OPENROUTER_API_KEY=sk-or-v1-xxxx
 
 # Milvus 配置
 MILVUS_HOST=localhost
@@ -268,7 +267,19 @@ MILVUS_PORT=19530
 RAG_TOP_K=3
 CHUNK_MAX_SIZE=800
 CHUNK_OVERLAP=100
+
+# Embedding / Rerank（本地运行，无需 API Key；首次运行自动下载模型）
+# EMBEDDING_MODEL=BAAI/bge-large-zh-v1.5      # 1024 维，中文运维文档检索
+# EMBEDDING_DEVICE=                            # 留空自动：mps > cpu
+# RERANK_ENABLED=True
+# RERANK_MODEL=BAAI/bge-reranker-base
+
+# 弱模型层（路由/改写等轻任务，可选免费档）
+# LLM_BACKUP_MODEL=nvidia/nemotron-3-nano-30b-a3b:free
 ```
+
+> **更换 Embedding 模型后**，旧向量全部失效，需执行 `make reindex-drop` 重建索引；
+> 仅重灌文档用 `make reindex`。
 
 ## 🎯 AIOps 智能运维
 
@@ -357,8 +368,8 @@ taskkill /F /PID <PID>
 ### API Key 错误
 ```bash
 # 检查环境变量
-cat .env | grep DASHSCOPE_API_KEY    # Linux/macOS
-type .env | findstr DASHSCOPE_API_KEY  # Windows
+cat .env | grep OPENROUTER_API_KEY    # Linux/macOS
+type .env | findstr OPENROUTER_API_KEY  # Windows
 ```
 
 ### Milvus 连接失败
@@ -412,7 +423,7 @@ netstat -ano | findstr :8004  # Monitor MCP
 - [FastAPI 文档](https://fastapi.tiangolo.com/)
 - [LangChain 文档](https://python.langchain.com/)
 - [LangGraph Plan-Execute](https://langchain-ai.github.io/langgraph/tutorials/plan-and-execute/)
-- [阿里云 DashScope](https://dashscope.aliyun.com/)
+- [OpenRouter](https://openrouter.ai/)
 - [MCP 协议](https://modelcontextprotocol.io/)
 
 ## 📄 许可证

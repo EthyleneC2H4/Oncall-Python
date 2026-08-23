@@ -7,8 +7,8 @@ from datetime import datetime
 from fastapi import APIRouter
 from loguru import logger
 
-from app.models.diagnosis_report import FeedbackRecord
 from app.eval.evaluator import AIOpsEvaluator
+from app.models.diagnosis_report import FeedbackRecord
 
 router = APIRouter()
 
@@ -19,8 +19,9 @@ FEEDBACK_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "feedback_da
 def _load_feedbacks() -> list[dict]:
     """加载所有反馈记录"""
     if os.path.exists(FEEDBACK_FILE):
-        with open(FEEDBACK_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+        with open(FEEDBACK_FILE, encoding="utf-8") as f:
+            feedbacks: list[dict] = json.load(f)
+            return feedbacks
     return []
 
 
@@ -59,13 +60,16 @@ async def submit_feedback(record: FeedbackRecord):
     if record.actual_root_cause and record.feedback_type == "negative":
         try:
             from app.services.knowledge_graph_service import knowledge_graph_service
-            stats = knowledge_graph_service.update_from_incident({
-                "incident_id": f"feedback_{record.session_id}_{record.message_index}",
-                "alert_type": record.comment or "未知告警",
-                "root_cause": record.actual_root_cause,
-                "resolution": "",
-                "cascade_alerts": [],
-            })
+
+            stats = knowledge_graph_service.update_from_incident(
+                {
+                    "incident_id": f"feedback_{record.session_id}_{record.message_index}",
+                    "alert_type": record.comment or "未知告警",
+                    "root_cause": record.actual_root_cause,
+                    "resolution": "",
+                    "cascade_alerts": [],
+                }
+            )
             kg_updated = True
             logger.info(f"从反馈学习到知识图谱: {stats}")
         except Exception as e:
@@ -77,7 +81,7 @@ async def submit_feedback(record: FeedbackRecord):
             "message": "反馈已记录",
             "kg_updated": kg_updated,
             "total_feedbacks": len(feedbacks),
-        }
+        },
     }
 
 

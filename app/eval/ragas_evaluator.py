@@ -12,13 +12,41 @@
 2. 组件评测 (component): 路由 + 检索 + KG 维度的快速评测（不调用 RAGAS）
 """
 
+import asyncio
 import json
 import time
-import asyncio
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 from loguru import logger
+
+from app.config import config
+from app.core.llm_factory import LLMFactory
+
+
+def _install_ragas_compat_shim() -> None:
+    """兼容垫片：ragas（≤0.4.x）在 ragas/llms/base.py 顶层
+    `from langchain_community.chat_models.vertexai import ChatVertexAI`，
+    该模块自 langchain-community 0.4 起已迁移至独立的 langchain-google-vertexai 包。
+    本项目的评估 LLM 走 OpenRouter，不使用 Vertex AI，
+    注入占位模块以避免为 ragas 引入硬依赖。
+    """
+    try:
+        import langchain_community.chat_models.vertexai  # noqa: F401
+    except ImportError:
+        stub = ModuleType("langchain_community.chat_models.vertexai")
+
+        class ChatVertexAI:  # noqa: D401 - 占位类，仅满足 ragas 的导入引用
+            pass
+
+        stub.ChatVertexAI = ChatVertexAI  # type: ignore[attr-defined]
+        import sys
+
+        sys.modules["langchain_community.chat_models.vertexai"] = stub
+
+
+_install_ragas_compat_shim()
 
 
 class RAGASEvaluator:
@@ -57,10 +85,10 @@ class RAGASEvaluator:
         if not filepath.exists():
             logger.warning(f"评测集文件不存在: {filepath}")
             return []
-        with open(filepath, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        logger.info(f"加载评测集: {filename}, {len(data)} 个用例")
-        return data
+        with open(filepath, encoding="utf-8") as f:
+            cases: list[dict] = json.load(f)
+        logger.info(f"加载评测集: {filename}, {len(cases)} 个用例")
+        return cases
 
     # ──────────────── RAGAS LLM / Embeddings ────────────────
 
@@ -68,13 +96,11 @@ class RAGASEvaluator:
         """获取 RAGAS 兼容的 LLM（延迟初始化）"""
         if self._evaluator_llm is None:
             from ragas.llms import LangchainLLMWrapper
-            from langchain_qwq import ChatQwen
-            from app.config import config
 
-            llm = ChatQwen(
+            llm = LLMFactory.create_chat_model(
                 model=config.rag_model,
-                api_key=config.dashscope_api_key,
                 temperature=0,
+                streaming=False,
             )
             self._evaluator_llm = LangchainLLMWrapper(llm)
         return self._evaluator_llm
@@ -83,11 +109,10 @@ class RAGASEvaluator:
         """获取 RAGAS 兼容的 Embeddings（延迟初始化）"""
         if self._evaluator_embeddings is None:
             from ragas.embeddings import LangchainEmbeddingsWrapper
+
             from app.services.vector_embedding_service import vector_embedding_service
 
-            self._evaluator_embeddings = LangchainEmbeddingsWrapper(
-                vector_embedding_service
-            )
+            self._evaluator_embeddings = LangchainEmbeddingsWrapper(vector_embedding_service)
         return self._evaluator_embeddings
 
     # ──────────────── 上下文收集（Retrieve + Generate）────────────────
@@ -97,9 +122,7 @@ class RAGASEvaluator:
         from app.tools import retrieve_knowledge
 
         try:
-            context = await asyncio.to_thread(
-                retrieve_knowledge.invoke, {"query": query}
-            )
+            context = await asyncio.to_thread(retrieve_knowledge.invoke, {"query": query})
             text = context if isinstance(context, str) else str(context)
             if text.strip():
                 return [text]
@@ -110,9 +133,6 @@ class RAGASEvaluator:
 
     async def _generate_answer(self, query: str, contexts: list[str]) -> str:
         """基于检索上下文生成回答"""
-        from langchain_qwq import ChatQwen
-        from app.config import config
-
         context_text = "\n\n".join(contexts) if contexts else "未检索到相关文档。"
         prompt = (
             "你是一个智能运维助手，请基于以下检索到的上下文回答用户的问题。\n"
@@ -122,13 +142,13 @@ class RAGASEvaluator:
             "## 回答\n"
         )
         try:
-            llm = ChatQwen(
+            llm = LLMFactory.create_chat_model(
                 model=config.rag_model,
-                api_key=config.dashscope_api_key,
                 temperature=0,
+                streaming=False,
             )
             result = await llm.ainvoke(prompt)
-            return result.content
+            return str(result.content)
         except Exception as e:
             logger.error(f"生成回答失败: {e}")
             return f"生成失败: {e}"
@@ -176,8 +196,7 @@ class RAGASEvaluator:
         Returns:
             包含 RAGAS 评分、用例详情和汇总的字典
         """
-        from ragas import evaluate as ragas_evaluate
-        from ragas import EvaluationDataset, SingleTurnSample
+        from ragas import EvaluationDataset, SingleTurnSample, evaluate as ragas_evaluate
 
         # 筛选用例
         cases = self.all_cases
@@ -195,16 +214,18 @@ class RAGASEvaluator:
         for tc in cases:
             logger.info(f"收集样本 {tc['id']}: {tc['query'][:30]}...")
             sample_data = await self._collect_sample(tc)
-            sample_meta.append({
-                "id": tc["id"],
-                "category": tc.get("category", ""),
-                "query": tc["query"],
-                "response": sample_data["response"],
-                "retrieved_contexts": sample_data["retrieved_contexts"],
-                "reference": sample_data["reference"],
-                "retrieval_latency_ms": sample_data["retrieval_latency_ms"],
-                "generation_latency_ms": sample_data["generation_latency_ms"],
-            })
+            sample_meta.append(
+                {
+                    "id": tc["id"],
+                    "category": tc.get("category", ""),
+                    "query": tc["query"],
+                    "response": sample_data["response"],
+                    "retrieved_contexts": sample_data["retrieved_contexts"],
+                    "reference": sample_data["reference"],
+                    "retrieval_latency_ms": sample_data["retrieval_latency_ms"],
+                    "generation_latency_ms": sample_data["generation_latency_ms"],
+                }
+            )
 
             sample = SingleTurnSample(
                 user_input=sample_data["user_input"],
@@ -214,7 +235,10 @@ class RAGASEvaluator:
             )
             samples.append(sample)
 
-        dataset = EvaluationDataset(samples=samples)
+        from ragas import MultiTurnSample
+
+        typed_samples: list[SingleTurnSample | MultiTurnSample] = list(samples)
+        dataset = EvaluationDataset(samples=typed_samples)
 
         # 构建指标列表
         ragas_metrics = self._build_metrics(metrics)
@@ -229,8 +253,9 @@ class RAGASEvaluator:
                 embeddings=self._get_evaluator_embeddings(),
             )
 
-            # 解析结果
-            scores_df = result.to_pandas()
+            # 解析结果（ragas 0.4 的返回类型标注含 Executor 分支，实际为同步结果）
+            to_pandas = result.to_pandas
+            scores_df = to_pandas()
             per_case_scores = scores_df.to_dict(orient="records")
 
             # 合并元信息和 RAGAS 评分
@@ -271,9 +296,9 @@ class RAGASEvaluator:
         """构建 RAGAS 指标实例"""
         from ragas.metrics import (
             Faithfulness,
-            ResponseRelevancy,
-            LLMContextRecall,
             LLMContextPrecisionWithReference,
+            LLMContextRecall,
+            ResponseRelevancy,
         )
 
         available = {
@@ -305,7 +330,8 @@ class RAGASEvaluator:
 
         # 全局平均分
         metric_columns = [
-            c for c in scores_df.columns
+            c
+            for c in scores_df.columns
             if c not in ("user_input", "retrieved_contexts", "response", "reference")
         ]
         for col in metric_columns:
@@ -375,7 +401,7 @@ class RAGASEvaluator:
     async def _evaluate_component_case(self, test_case: dict) -> dict:
         """组件级评测单个用例"""
         from app.services.query_router import query_router
-        from app.tools import retrieve_knowledge, query_alert_graph
+        from app.tools import query_alert_graph, retrieve_knowledge
 
         tc_id = test_case["id"]
         query = test_case["query"]
@@ -416,8 +442,7 @@ class RAGASEvaluator:
             # Context Recall
             if expected_docs:
                 recalled = sum(
-                    1 for doc in expected_docs
-                    if doc.replace(".md", "") in retrieval_text.lower()
+                    1 for doc in expected_docs if doc.replace(".md", "") in retrieval_text.lower()
                 )
                 result["context_recall"] = round(recalled / len(expected_docs), 4)
             else:
@@ -426,10 +451,7 @@ class RAGASEvaluator:
             # Context Precision
             expected_contains = test_case.get("expected_answer_contains", [])
             if expected_contains and retrieval_text:
-                matched = sum(
-                    1 for kw in expected_contains
-                    if kw.lower() in retrieval_text.lower()
-                )
+                matched = sum(1 for kw in expected_contains if kw.lower() in retrieval_text.lower())
                 result["context_precision"] = round(matched / len(expected_contains), 4)
 
             result["retrieval"] = {
@@ -449,9 +471,11 @@ class RAGASEvaluator:
                 kg_result = query_alert_graph.invoke({"alert_keyword": kw})
                 if kg_result and "未找到" not in kg_result:
                     expected_rcs = test_case.get("expected_root_causes", [])
-                    root_cause_hit = any(
-                        rc.lower() in kg_result.lower() for rc in expected_rcs
-                    ) if expected_rcs else False
+                    root_cause_hit = (
+                        any(rc.lower() in kg_result.lower() for rc in expected_rcs)
+                        if expected_rcs
+                        else False
+                    )
 
                     result["kg_analysis"] = {
                         "found": True,
@@ -472,24 +496,16 @@ class RAGASEvaluator:
         if total == 0:
             return {}
 
-        routing_correct = sum(
-            1 for r in case_results if r.get("routing", {}).get("correct", False)
-        )
+        routing_correct = sum(1 for r in case_results if r.get("routing", {}).get("correct", False))
         retrieval_returned = sum(
             1 for r in case_results if r.get("retrieval", {}).get("returned", False)
         )
-        kg_found = sum(
-            1 for r in case_results if r.get("kg_analysis", {}).get("found", False)
-        )
+        kg_found = sum(1 for r in case_results if r.get("kg_analysis", {}).get("found", False))
         kg_root_hit = sum(
             1 for r in case_results if r.get("kg_analysis", {}).get("root_cause_hit", False)
         )
-        avg_context_recall = sum(
-            r.get("context_recall", 0) for r in case_results
-        ) / total
-        avg_context_precision = sum(
-            r.get("context_precision", 0) for r in case_results
-        ) / total
+        avg_context_recall = sum(r.get("context_recall", 0) for r in case_results) / total
+        avg_context_precision = sum(r.get("context_precision", 0) for r in case_results) / total
 
         # 按类别汇总
         categories: dict[str, dict] = {}

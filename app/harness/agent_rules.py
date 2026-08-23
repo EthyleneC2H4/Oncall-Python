@@ -64,7 +64,7 @@ def get_rules_for_alert(alert_keyword: str) -> str:
     for key, specific_rules in _ALERT_SPECIFIC_RULES.items():
         if key in keyword_lower:
             rules.append(f"\n### {alert_keyword} 专项规则")
-            for i, rule in enumerate(specific_rules, 1):
+            for _i, rule in enumerate(specific_rules, 1):
                 rules.append(f"- {rule}")
 
     return "\n".join(rules)

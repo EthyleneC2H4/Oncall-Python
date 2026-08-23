@@ -3,8 +3,8 @@
 基于 LangGraph 官方教程实现，增加诊断轨迹追踪和降级状态
 """
 
-from typing import List, TypedDict, Annotated
 import operator
+from typing import Annotated, TypedDict
 
 
 class PlanExecuteState(TypedDict):
@@ -14,11 +14,11 @@ class PlanExecuteState(TypedDict):
     input: str
 
     # 执行计划（步骤列表）
-    plan: List[str]
+    plan: list[str]
 
     # 已执行的步骤历史
     # 使用 operator.add 实现追加式更新（而非覆盖）
-    past_steps: Annotated[List[tuple], operator.add]
+    past_steps: Annotated[list[tuple], operator.add]
 
     # 最终响应/报告
     response: str
@@ -30,11 +30,11 @@ class PlanExecuteState(TypedDict):
     query_intent: str
 
     # 诊断事件流（推理轨迹），使用 operator.add 追加
-    diagnosis_events: Annotated[List[dict], operator.add]
+    diagnosis_events: Annotated[list[dict], operator.add]
 
     # 错误上下文（降级策略追踪），使用 operator.add 追加
     # 每条: {"step": str, "error_type": str, "error_msg": str}
-    error_context: Annotated[List[dict], operator.add]
+    error_context: Annotated[list[dict], operator.add]
 
     # 当前降级等级
     degradation_level: str

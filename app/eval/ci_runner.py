@@ -19,14 +19,13 @@
     python -m app.eval.ci_runner --mode smoke
 """
 
+import argparse
 import json
 import time
-import argparse
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
-
 
 # CI 门禁阈值配置
 CI_THRESHOLDS = {
@@ -96,9 +95,7 @@ class CIEvalRunner:
         from app.eval.ragas_evaluator import ragas_evaluator
 
         # 只测 easy + medium（核心能力）
-        component_results = await ragas_evaluator.evaluate_component(
-            categories=["easy", "medium"]
-        )
+        component_results = await ragas_evaluator.evaluate_component(categories=["easy", "medium"])
         summary = component_results.get("summary", {})
 
         thresholds = {
@@ -131,9 +128,7 @@ class CIEvalRunner:
         from app.eval.ragas_evaluator import ragas_evaluator
 
         # 只测 easy 类别
-        component_results = await ragas_evaluator.evaluate_component(
-            categories=["easy"]
-        )
+        component_results = await ragas_evaluator.evaluate_component(categories=["easy"])
         summary = component_results.get("summary", {})
 
         gate_result = self._check_gate(summary, CI_THRESHOLDS["smoke"])
@@ -185,9 +180,7 @@ class CIEvalRunner:
 
     # ──────────────── 门禁检查 ────────────────
 
-    def _check_gate(
-        self, summary: dict, thresholds: dict
-    ) -> dict[str, Any]:
+    def _check_gate(self, summary: dict, thresholds: dict) -> dict[str, Any]:
         """检查评测结果是否通过门禁"""
         checks = []
         all_passed = True
@@ -199,18 +192,21 @@ class CIEvalRunner:
             passed = actual >= threshold
             if not passed:
                 all_passed = False
-            checks.append({
-                "metric": metric,
-                "actual": actual,
-                "threshold": threshold,
-                "passed": passed,
-            })
+            checks.append(
+                {
+                    "metric": metric,
+                    "actual": actual,
+                    "threshold": threshold,
+                    "passed": passed,
+                }
+            )
 
         return {
             "passed": all_passed,
             "checks": checks,
             "summary": (
-                "全部通过" if all_passed
+                "全部通过"
+                if all_passed
                 else f"{sum(1 for c in checks if not c['passed'])}/{len(checks)} 未通过"
             ),
         }
@@ -224,8 +220,7 @@ class CIEvalRunner:
         for check in gate.get("checks", []):
             icon = "[PASS]" if check["passed"] else "[FAIL]"
             logger.info(
-                f"  {icon} {check['metric']}: "
-                f"{check['actual']:.2%} >= {check['threshold']:.2%}"
+                f"  {icon} {check['metric']}: " f"{check['actual']:.2%} >= {check['threshold']:.2%}"
             )
         logger.info(f"\n{gate['summary']}")
 
@@ -289,29 +284,19 @@ class CIEvalRunner:
 
 # ──────────────── CLI ────────────────
 
+
 async def main():
     parser = argparse.ArgumentParser(description="OnCall CI 评测管道")
     parser.add_argument(
-        "--mode", choices=["regression", "gating", "smoke", "full"],
-        default="smoke", help="评测模式"
+        "--mode",
+        choices=["regression", "gating", "smoke", "full"],
+        default="smoke",
+        help="评测模式",
     )
-    parser.add_argument(
-        "--threshold", type=float, default=0.6,
-        help="门禁阈值 (仅 gating 模式)"
-    )
-    parser.add_argument(
-        "--max-e2e", type=int, default=10,
-        help="E2E 最大用例数 (仅 full 模式)"
-    )
-    parser.add_argument(
-        "--metrics", nargs="*",
-        default=None,
-        help="RAGAS 指标 (仅 full 模式)"
-    )
-    parser.add_argument(
-        "--output-dir", default="eval/results",
-        help="输出目录"
-    )
+    parser.add_argument("--threshold", type=float, default=0.6, help="门禁阈值 (仅 gating 模式)")
+    parser.add_argument("--max-e2e", type=int, default=10, help="E2E 最大用例数 (仅 full 模式)")
+    parser.add_argument("--metrics", nargs="*", default=None, help="RAGAS 指标 (仅 full 模式)")
+    parser.add_argument("--output-dir", default="eval/results", help="输出目录")
 
     args = parser.parse_args()
     runner = CIEvalRunner(output_dir=args.output_dir)
@@ -330,4 +315,5 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

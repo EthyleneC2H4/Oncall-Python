@@ -16,17 +16,17 @@ class TokenBudgetManager:
 
     # 各模型的 Token 上限
     MODEL_LIMITS = {
-        "qwen-max": 30000,      # 预留 2000 给输出
+        "qwen-max": 30000,  # 预留 2000 给输出
         "qwen-plus": 30000,
         "qwen-turbo": 6000,
     }
 
     # 默认预算分配
     BUDGET_ALLOCATION = {
-        "system_prompt": 0.10,    # 10% 给系统提示词
-        "context": 0.50,          # 50% 给上下文（KG + RAG + 历史）
-        "tools": 0.15,            # 15% 给工具描述
-        "output": 0.25,           # 25% 给输出
+        "system_prompt": 0.10,  # 10% 给系统提示词
+        "context": 0.50,  # 50% 给上下文（KG + RAG + 历史）
+        "tools": 0.15,  # 15% 给工具描述
+        "output": 0.25,  # 25% 给输出
     }
 
     # 中文近似：1 个字符 ≈ 1.5 token
@@ -40,17 +40,14 @@ class TokenBudgetManager:
         if not text:
             return 0
         # 中文字符 ≈ 1.5 token/char，英文 ≈ 0.25 token/word
-        chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+        chinese_chars = sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
         other_chars = len(text) - chinese_chars
         return int(chinese_chars * 1.5 + other_chars * 0.4)
 
     def get_budget(self, model: str = "qwen-max") -> dict:
         """获取模型的 Token 预算分配"""
         total = self.MODEL_LIMITS.get(model, 30000)
-        return {
-            part: int(total * ratio)
-            for part, ratio in self.BUDGET_ALLOCATION.items()
-        }
+        return {part: int(total * ratio) for part, ratio in self.BUDGET_ALLOCATION.items()}
 
     def trim_context(
         self,
@@ -75,9 +72,7 @@ class TokenBudgetManager:
         # 估算当前 Token
         rag_tokens = self.estimate_tokens(rag_context)
         kg_tokens = self.estimate_tokens(kg_context)
-        history_tokens = sum(
-            self.estimate_tokens(str(m)) for m in (history or [])
-        )
+        history_tokens = sum(self.estimate_tokens(str(m)) for m in (history or []))
         total_tokens = rag_tokens + kg_tokens + history_tokens
 
         result = {
@@ -93,15 +88,15 @@ class TokenBudgetManager:
         if total_tokens <= context_budget:
             return result
 
-        logger.info(
-            f"Token 超预算: {total_tokens} > {context_budget}, 启动降级"
-        )
+        logger.info(f"Token 超预算: {total_tokens} > {context_budget}, 启动降级")
         result["trimmed"] = True
 
         # Level 1: 截断 RAG 上下文
         if rag_tokens > context_budget * 0.5:
             max_rag_chars = int(context_budget * 0.5 * self.CHARS_PER_TOKEN)
-            result["rag_context"] = rag_context[:max_rag_chars] + "\n...(RAG 内容已截断以适应 Token 预算)"
+            result["rag_context"] = (
+                rag_context[:max_rag_chars] + "\n...(RAG 内容已截断以适应 Token 预算)"
+            )
             result["level"] = "rag_truncated"
             rag_tokens = self.estimate_tokens(result["rag_context"])
             logger.info(f"Level 1: RAG 截断至 {max_rag_chars} 字符")
@@ -110,10 +105,8 @@ class TokenBudgetManager:
         if history and len(history) > 4:
             result["history"] = history[-4:]
             result["level"] = "history_compressed"
-            history_tokens = sum(
-                self.estimate_tokens(str(m)) for m in result["history"]
-            )
-            logger.info(f"Level 2: 历史压缩至最近 4 条")
+            history_tokens = sum(self.estimate_tokens(str(m)) for m in result["history"])
+            logger.info("Level 2: 历史压缩至最近 4 条")
 
         # Level 3: 截断 KG 上下文
         total_tokens = rag_tokens + kg_tokens + history_tokens

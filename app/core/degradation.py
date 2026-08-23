@@ -4,38 +4,39 @@
 所有降级路径共享此模块以保持一致性。
 """
 
-from enum import Enum
-from typing import Optional
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class DegradationLevel(str, Enum):
+class DegradationLevel(StrEnum):
     """降级等级"""
-    NONE = "none"                   # 正常
-    BACKUP_MODEL = "backup_model"   # 使用备用 LLM
-    NO_RERANK = "no_rerank"         # 跳过 Rerank
-    BM25_ONLY = "bm25_only"        # 仅 BM25 关键词检索
-    BM25_RAW = "bm25_raw"          # BM25 + 原始查询（无改写）
-    KG_ONLY = "kg_only"            # 仅知识图谱
-    CACHED = "cached"              # 缓存结果
+
+    NONE = "none"  # 正常
+    BACKUP_MODEL = "backup_model"  # 使用备用 LLM
+    NO_RERANK = "no_rerank"  # 跳过 Rerank
+    BM25_ONLY = "bm25_only"  # 仅 BM25 关键词检索
+    BM25_RAW = "bm25_raw"  # BM25 + 原始查询（无改写）
+    KG_ONLY = "kg_only"  # 仅知识图谱
+    CACHED = "cached"  # 缓存结果
     SINGLE_AGENT = "single_agent"  # 多 Agent 降级为单 Agent
-    DIRECT_RAG = "direct_rag"      # 跳过 Agent，直接 RAG
-    TEMPLATE = "template"          # 静态模板响应
+    DIRECT_RAG = "direct_rag"  # 跳过 Agent，直接 RAG
+    TEMPLATE = "template"  # 静态模板响应
 
 
 class DegradationInfo(BaseModel):
     """附加在 API 响应中的降级状态"""
+
     is_degraded: bool = False
-    level: str = "none"                           # none / minor / moderate / severe
+    level: str = "none"  # none / minor / moderate / severe
     active_degradations: list[str] = Field(default_factory=list)
     unavailable_services: list[str] = Field(default_factory=list)
-    user_message: Optional[str] = None
+    user_message: str | None = None
 
 
 # ---------- 用户提示映射 ----------
 
-DEGRADATION_MESSAGES: dict[str, Optional[str]] = {
+DEGRADATION_MESSAGES: dict[str, str | None] = {
     DegradationLevel.BACKUP_MODEL: None,  # 对用户透明
     DegradationLevel.NO_RERANK: "结果排序精度可能略有不同。",
     DegradationLevel.BM25_ONLY: "语义检索暂时不可用，当前基于关键词匹配。",
@@ -53,10 +54,10 @@ TEMPLATE_RESPONSES: dict[str, str] = {
     "DIAGNOSTIC": (
         "当前无法执行完整诊断分析。基于您的告警描述，建议检查：\n"
         "1. 近期变更记录\n2. 资源使用率趋势\n3. 应用日志中的错误信息\n"
-        "请稍后重试以获取完整诊断报告。"
+        "请稍后重试以获取根因定位的完整诊断报告。"
     ),
     "KNOWLEDGE": "知识库检索暂时不可用，请稍后重试或直接查阅运维文档。",
-    "CHITCHAT": "我当前遇到一些连接问题，请稍后再试。",
+    "CHITCHAT": "运维助手当前遇到一些连接问题，请稍后再试。",
     "COMPLEX": "复杂分析功能暂时不可用，请尝试简化查询或稍后重试。",
 }
 
@@ -69,10 +70,18 @@ def severity_of(level: DegradationLevel) -> str:
     """降级等级 → 严重程度"""
     if level in (DegradationLevel.NONE,):
         return "none"
-    if level in (DegradationLevel.BACKUP_MODEL, DegradationLevel.NO_RERANK):
+    if level in (
+        DegradationLevel.BACKUP_MODEL,
+        DegradationLevel.NO_RERANK,
+        DegradationLevel.CACHED,
+    ):
+        # 备用模型对用户透明、缓存结果内容一致，均属轻度降级
         return "minor"
-    if level in (DegradationLevel.BM25_ONLY, DegradationLevel.BM25_RAW,
-                 DegradationLevel.SINGLE_AGENT):
+    if level in (
+        DegradationLevel.BM25_ONLY,
+        DegradationLevel.BM25_RAW,
+        DegradationLevel.SINGLE_AGENT,
+    ):
         return "moderate"
     return "severe"
 
@@ -85,14 +94,16 @@ def build_degradation_info(
     if not levels or levels == [DegradationLevel.NONE]:
         return DegradationInfo()
 
-    worst = max(levels, key=lambda l: list(DegradationLevel).index(l))
-    messages = [DEGRADATION_MESSAGES.get(l) for l in levels]
+    worst = max(levels, key=lambda lvl: list(DegradationLevel).index(lvl))
+    messages = [DEGRADATION_MESSAGES.get(lvl) for lvl in levels]
     user_msg = next((m for m in messages if m), None)
 
     return DegradationInfo(
         is_degraded=True,
         level=severity_of(worst),
-        active_degradations=[l.value for l in levels if l != DegradationLevel.NONE],
+        active_degradations=[
+            lvl.value for lvl in levels if lvl != DegradationLevel.NONE
+        ],
         unavailable_services=unavailable or [],
         user_message=user_msg,
     )

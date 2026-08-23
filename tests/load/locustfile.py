@@ -19,8 +19,8 @@
 """
 
 import random
-from locust import HttpUser, task, between, events
 
+from locust import HttpUser, between, events, task
 
 # ──────────────── 测试数据 ────────────────
 
@@ -68,6 +68,7 @@ def random_query() -> str:
 
 
 # ──────────────── 用户行为类 ────────────────
+
 
 class OnCallUser(HttpUser):
     """模拟运维工程师使用 OnCall 的行为模式"""
@@ -214,6 +215,7 @@ class AIOpsHeavyUser(HttpUser):
 
 # ──────────────── 自定义事件 ────────────────
 
+
 @events.test_start.add_listener
 def on_test_start(environment, **kwargs):
     """测试开始时的日志"""
@@ -221,7 +223,7 @@ def on_test_start(environment, **kwargs):
     print("OnCall API 压力测试开始")
     print(f"{'='*60}")
     print(f"目标: {environment.host}")
-    print(f"场景: 健康检查 + 对话 + AIOps 诊断 + 反馈")
+    print("场景: 健康检查 + 对话 + AIOps 诊断 + 反馈")
 
 
 @events.test_stop.add_listener

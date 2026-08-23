@@ -1,34 +1,45 @@
-"""Rerank 重排服务
+"""Rerank 重排服务 - 本地 cross-encoder 模型
 
-使用 DashScope gte-rerank 模型对粗召回结果进行精排：
+使用本地 BGE reranker（FlagEmbedding，默认 BAAI/bge-reranker-base）对粗召回结果精排：
 - 粗召回（向量 + BM25）侧重高召回率，结果可能包含噪声
 - Rerank 使用 cross-encoder 对 query-document pair 精确打分
 - 精排后 top-k 的精度显著提升
+
+模型懒加载；可通过 config.rerank_enabled=False 关闭（直接返回原始排序）。
 """
 
-from typing import List
 
-import dashscope
 from langchain_core.documents import Document
 from loguru import logger
 
 from app.config import config
-from app.core.circuit_breaker import get_breaker, BREAKER_RERANK, CircuitOpenError
+from app.core.circuit_breaker import BREAKER_RERANK, CircuitOpenError, get_breaker
 from app.core.health_registry import health_registry
 
 
 class Reranker:
-    """基于 DashScope gte-rerank 的重排器"""
+    """基于本地 FlagEmbedding cross-encoder 的重排器"""
 
     def __init__(self, model: str | None = None):
         self.model = model or config.rerank_model
+        self._model = None  # 懒加载
+
+    def _ensure_loaded(self):
+        """懒加载底层重排模型"""
+        if self._model is None:
+            from FlagEmbedding import FlagReranker
+
+            logger.info(f"加载本地重排模型 {self.model}...")
+            self._model = FlagReranker(self.model, use_fp16=False)
+            logger.info("本地重排模型加载完成")
+        return self._model
 
     async def rerank(
         self,
         query: str,
-        documents: List[Document],
+        documents: list[Document],
         top_n: int = 3,
-    ) -> List[Document]:
+    ) -> list[Document]:
         """对文档列表进行重排
 
         Args:
@@ -45,44 +56,38 @@ class Reranker:
         if len(documents) <= 1:
             return documents
 
+        if not config.rerank_enabled:
+            logger.debug("Rerank 已通过配置关闭，返回原始排序")
+            return documents[:top_n]
+
         breaker = get_breaker(BREAKER_RERANK)
         try:
             breaker.before_call()
 
-            # 提取文档文本
             doc_texts = [doc.page_content for doc in documents]
+            model = self._ensure_loaded()
+            scores = model.compute_score(
+                [[query, text] for text in doc_texts],
+                normalize=True,
+            )
+            # 单文档时 compute_score 返回标量
+            if not isinstance(scores, list):
+                scores = [scores]
 
-            # 调用 DashScope Rerank API
-            response = dashscope.TextReRank.call(
-                model=self.model,
-                query=query,
-                documents=doc_texts,
-                top_n=min(top_n, len(documents)),
-                api_key=config.dashscope_api_key,
-                return_documents=True,
+            ranked = sorted(
+                zip(scores, range(len(documents)), strict=False),
+                key=lambda pair: pair[0],
+                reverse=True,
             )
 
-            if response.status_code != 200:
-                breaker.record_failure()
-                health_registry.mark_failure("dashscope_rerank")
-                logger.warning(
-                    f"Rerank API 调用失败: {response.code} - {response.message}，"
-                    "返回原始排序"
-                )
-                return documents[:top_n]
-
-            # 解析结果，按 rerank 分数排序
             reranked_docs = []
-            for item in response.output.results:
-                original_index = item.index
-                relevance_score = item.relevance_score
-                if original_index < len(documents):
-                    doc = documents[original_index]
-                    doc.metadata["rerank_score"] = relevance_score
-                    reranked_docs.append(doc)
+            for score, original_index in ranked[: min(top_n, len(documents))]:
+                doc = documents[original_index]
+                doc.metadata["rerank_score"] = float(score)
+                reranked_docs.append(doc)
 
             breaker.record_success()
-            health_registry.mark_success("dashscope_rerank")
+            health_registry.mark_success("rerank")
             logger.info(
                 f"Rerank 完成: {len(documents)} 篇 → {len(reranked_docs)} 篇, "
                 f"top score={reranked_docs[0].metadata.get('rerank_score', 'N/A') if reranked_docs else 'N/A'}"
@@ -90,11 +95,11 @@ class Reranker:
             return reranked_docs
 
         except CircuitOpenError:
-            logger.warning("Rerank API 熔断，返回原始排序")
+            logger.warning("Rerank 熔断，返回原始排序")
             return documents[:top_n]
         except Exception as e:
             breaker.record_failure()
-            health_registry.mark_failure("dashscope_rerank")
+            health_registry.mark_failure("rerank")
             logger.error(f"Rerank 失败: {e}，返回原始排序")
             return documents[:top_n]
 

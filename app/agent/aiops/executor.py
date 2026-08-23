@@ -4,23 +4,25 @@ Executor 节点：执行单个步骤
 """
 
 import asyncio
-from typing import Dict, Any
+from typing import Any
+
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_qwq import ChatQwen
 from langgraph.prebuilt import ToolNode
 from loguru import logger
 
-from app.config import config
-from app.tools import get_current_time, retrieve_knowledge, query_alert_graph, predict_alert_cascade
 from app.agent.mcp_client import get_mcp_client_with_retry
+from app.config import config
+from app.core.llm_factory import LLMFactory
 from app.harness.agent_rules import AGENT_RULES
+from app.tools import get_current_time, predict_alert_cascade, query_alert_graph, retrieve_knowledge
+
 from .state import PlanExecuteState
 
 
-async def executor(state: PlanExecuteState) -> Dict[str, Any]:
+async def executor(state: PlanExecuteState) -> dict[str, Any]:
     """
     执行节点：执行计划中的下一个步骤
-    
+
     使用 LangGraph 的 ToolNode 自动处理工具调用
     """
     logger.info("=== Executor：执行步骤 ===")
@@ -53,10 +55,10 @@ async def executor(state: PlanExecuteState) -> Dict[str, Any]:
 
         all_tools = local_tools + mcp_tools
 
-        llm = ChatQwen(
+        llm = LLMFactory.create_chat_model(
             model=config.rag_model,
-            api_key=config.dashscope_api_key,
-            temperature=0
+            temperature=0,
+            streaming=False,
         )
         llm_with_tools = llm.bind_tools(all_tools)
 
@@ -78,7 +80,7 @@ async def executor(state: PlanExecuteState) -> Dict[str, Any]:
 - 专注于当前步骤，不要考虑其他任务
 
 {AGENT_RULES}"""),
-            HumanMessage(content=f"请执行以下任务: {task}")
+            HumanMessage(content=f"请执行以下任务: {task}"),
         ]
 
         llm_response = await llm_with_tools.ainvoke(messages)
@@ -92,10 +94,14 @@ async def executor(state: PlanExecuteState) -> Dict[str, Any]:
 
             messages.extend(tool_messages["messages"])
             final_response = await llm_with_tools.ainvoke(messages)
-            return final_response.content if hasattr(final_response, 'content') else str(final_response)
+            return (
+                final_response.content
+                if hasattr(final_response, "content")
+                else str(final_response)
+            )
         else:
             logger.info("LLM 未调用工具，直接返回结果")
-            return llm_response.content if hasattr(llm_response, 'content') else str(llm_response)
+            return llm_response.content if hasattr(llm_response, "content") else str(llm_response)
 
     # 带超时的步骤执行
     step_timeout = config.step_timeout_seconds
@@ -108,12 +114,14 @@ async def executor(state: PlanExecuteState) -> Dict[str, Any]:
             "past_steps": [(task, result)],
         }
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning(f"步骤执行超时 ({step_timeout}s): {task}")
         return {
             "plan": plan[1:],
             "past_steps": [(task, f"步骤执行超时（{step_timeout}s）")],
-            "error_context": [{"step": task, "error_type": "timeout", "error_msg": f"超时 {step_timeout}s"}],
+            "error_context": [
+                {"step": task, "error_type": "timeout", "error_msg": f"超时 {step_timeout}s"}
+            ],
         }
 
     except Exception as e:

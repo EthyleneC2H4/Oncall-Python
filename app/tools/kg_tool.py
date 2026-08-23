@@ -50,7 +50,7 @@ def predict_alert_cascade(alert_keyword: str) -> str:
     try:
         logger.info(f"告警级联预测: keyword='{alert_keyword}'")
         prediction = knowledge_graph_service.get_cascade_prediction(alert_keyword)
-        logger.info(f"级联预测完成")
+        logger.info("级联预测完成")
         return prediction
 
     except Exception as e:

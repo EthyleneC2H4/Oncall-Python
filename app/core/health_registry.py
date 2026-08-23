@@ -8,13 +8,13 @@
 
 import asyncio
 import time
-from enum import Enum
-from typing import Dict, Callable, Awaitable, Optional
+from collections.abc import Awaitable, Callable
+from enum import StrEnum
 
 from loguru import logger
 
 
-class ServiceStatus(str, Enum):
+class ServiceStatus(StrEnum):
     HEALTHY = "healthy"
     DEGRADED = "degraded"
     DOWN = "down"
@@ -27,9 +27,9 @@ class ServiceHealth:
         self.name = name
         self.status = ServiceStatus.HEALTHY
         self.last_check: float = 0.0
-        self.last_success: Optional[float] = None
+        self.last_success: float | None = None
         self.consecutive_failures: int = 0
-        self.latency_ms: Optional[float] = None
+        self.latency_ms: float | None = None
 
     def record_success(self, latency_ms: float) -> None:
         self.status = ServiceStatus.HEALTHY
@@ -63,12 +63,12 @@ class HealthRegistry:
     """全局健康注册中心"""
 
     def __init__(self):
-        self._services: Dict[str, ServiceHealth] = {}
-        self._probes: Dict[str, ProbeFunc] = {}
-        self._probe_task: Optional[asyncio.Task] = None
+        self._services: dict[str, ServiceHealth] = {}
+        self._probes: dict[str, ProbeFunc] = {}
+        self._probe_task: asyncio.Task | None = None
         self._interval_seconds: float = 30.0
 
-    def register(self, name: str, probe: Optional[ProbeFunc] = None) -> None:
+    def register(self, name: str, probe: ProbeFunc | None = None) -> None:
         """注册服务（可选探针函数）"""
         if name not in self._services:
             self._services[name] = ServiceHealth(name)
@@ -103,7 +103,7 @@ class HealthRegistry:
             svc.status = ServiceStatus.DOWN
             svc.consecutive_failures = 5
 
-    def get_all_status(self) -> Dict[str, dict]:
+    def get_all_status(self) -> dict[str, dict]:
         return {name: svc.to_dict() for name, svc in self._services.items()}
 
     # ---------- 后台探针 ----------
@@ -144,7 +144,7 @@ class HealthRegistry:
                     self.mark_success(name, latency)
                 else:
                     self.mark_failure(name)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 self.mark_failure(name)
                 logger.warning(f"健康探针超时: {name}")
             except Exception as e:

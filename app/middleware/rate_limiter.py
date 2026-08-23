@@ -13,8 +13,8 @@ from collections import defaultdict
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from loguru import logger
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 
 class SlidingWindowCounter:
@@ -50,9 +50,9 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
     """请求限流中间件"""
 
     # 限流规则
-    GLOBAL_LIMIT = 100        # 全局: 100 req/min
-    SESSION_LIMIT = 10        # 单 session: 10 req/min
-    AIOPS_LIMIT = 5           # AIOps: 5 req/min
+    GLOBAL_LIMIT = 100  # 全局: 100 req/min
+    SESSION_LIMIT = 10  # 单 session: 10 req/min
+    AIOPS_LIMIT = 5  # AIOps: 5 req/min
 
     # AIOps 路径标识
     AIOPS_PATHS = {"/api/aiops", "/api/multi-diagnose"}
@@ -65,9 +65,7 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         )
         self._aiops_counter = SlidingWindowCounter(60, self.AIOPS_LIMIT)
 
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         # 只对 API 路径限流
         path = request.url.path
         if not path.startswith("/api/"):

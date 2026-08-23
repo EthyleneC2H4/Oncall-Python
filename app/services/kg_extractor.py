@@ -6,26 +6,29 @@
 
 import json
 import re
-from typing import Any
 
-from langchain_qwq import ChatQwen
 from loguru import logger
 from pydantic import BaseModel, Field
 
 from app.config import config
+from app.core.llm_factory import LLMFactory
 
 
 class Triple(BaseModel):
     """知识图谱三元组"""
+
     head: str = Field(description="头实体")
     head_type: str = Field(description="头实体类型: alert | root_cause | action | tool | metric")
-    relation: str = Field(description="关系类型: CAUSED_BY | RESOLVED_BY | MAY_TRIGGER | USES | INDICATES")
+    relation: str = Field(
+        description="关系类型: CAUSED_BY | RESOLVED_BY | MAY_TRIGGER | USES | INDICATES"
+    )
     tail: str = Field(description="尾实体")
     tail_type: str = Field(description="尾实体类型")
 
 
 class IncidentRecord(BaseModel):
     """已解决的故障事件记录"""
+
     incident_id: str = Field(description="事件ID")
     alert_type: str = Field(description="告警类型")
     root_cause: str = Field(default="", description="根因")
@@ -38,6 +41,7 @@ def _get_extract_prompt() -> str:
     """获取 KG 抽取 Prompt，优先从版本化管理器加载"""
     try:
         from app.core.prompt_manager import prompt_manager
+
         template = prompt_manager.get("extract")
         if template:
             return template.content
@@ -89,9 +93,9 @@ class KGExtractor:
     @property
     def llm(self):
         if self._llm is None:
-            self._llm = ChatQwen(
+            self._llm = LLMFactory.create_chat_model(
+                streaming=False,
                 model=config.rag_model,
-                api_key=config.dashscope_api_key,
                 temperature=0,
             )
         return self._llm
@@ -110,13 +114,11 @@ class KGExtractor:
             if len(document) > 3000:
                 document = document[:3000] + "\n...(文档已截断)"
 
-            result = await self.llm.ainvoke(
-                EXTRACT_PROMPT.format(document=document)
-            )
+            result = await self.llm.ainvoke(EXTRACT_PROMPT.format(document=document))
             content = result.content.strip()
 
             # 提取 JSON
-            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            json_match = re.search(r"\{.*\}", content, re.DOTALL)
             if not json_match:
                 logger.warning("LLM 未返回有效 JSON")
                 return []

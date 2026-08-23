@@ -7,9 +7,9 @@ from pymilvus import (
     DataType,
     FieldSchema,
     MilvusClient,
+    MilvusException,
     connections,
     utility,
-    MilvusException,
 )
 
 from app.config import config
@@ -33,12 +33,12 @@ def _patch_pymilvus_milvus_client_orm_alias() -> None:
 
     _orig_init = MilvusClient.__init__
 
-    def _wrapped_init(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+    def _wrapped_init(self, *args, **kwargs):
         _orig_init(self, *args, **kwargs)
         self._using = "default"
 
-    MilvusClient.__init__ = _wrapped_init  # type: ignore[method-assign]
-    setattr(_patch_pymilvus_milvus_client_orm_alias, "_done", True)
+    MilvusClient.__init__ = _wrapped_init
+    _patch_pymilvus_milvus_client_orm_alias._done = True  # type: ignore[attr-defined]
 
 
 class MilvusClientManager:
@@ -98,7 +98,7 @@ class MilvusClientManager:
             else:
                 logger.info(f"collection '{self.COLLECTION_NAME}' 已存在")
                 self._collection = Collection(self.COLLECTION_NAME)
-                
+
                 # 检查向量维度是否匹配
                 schema = self._collection.schema
                 vector_field = None
@@ -107,9 +107,13 @@ class MilvusClientManager:
                     if field.name == "vector":
                         vector_field = field
                         break
-                
-                if vector_field and hasattr(vector_field, 'params') and 'dim' in vector_field.params:
-                    existing_dim = vector_field.params['dim']
+
+                if (
+                    vector_field
+                    and hasattr(vector_field, "params")
+                    and "dim" in vector_field.params
+                ):
+                    existing_dim = vector_field.params["dim"]
                     if existing_dim != self.VECTOR_DIM:
                         logger.warning(
                             f"检测到向量维度不匹配！当前 collection 维度: {existing_dim}, 配置维度: {self.VECTOR_DIM}"
@@ -144,7 +148,7 @@ class MilvusClientManager:
         """检查 collection 是否存在"""
         # pymilvus 的类型标注可能不准确，实际返回 bool
         result = utility.has_collection(self.COLLECTION_NAME)
-        return bool(result)  # type: ignore[arg-type]
+        return bool(result)
 
     def _create_collection(self) -> None:
         """创建 biz collection"""
@@ -277,7 +281,7 @@ class MilvusClientManager:
     def close(self) -> None:
         """关闭连接"""
         errors = []
-        
+
         try:
             if self._collection is not None:
                 self._collection.release()
@@ -292,7 +296,7 @@ class MilvusClientManager:
             errors.append(f"断开连接失败: {e}")
 
         self._client = None
-        
+
         if errors:
             error_msg = "; ".join(errors)
             logger.error(f"关闭 Milvus 连接时出现错误: {error_msg}")
@@ -305,10 +309,7 @@ class MilvusClientManager:
         return self
 
     def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: object
+        self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: object
     ) -> None:
         """上下文管理器退出"""
         self.close()

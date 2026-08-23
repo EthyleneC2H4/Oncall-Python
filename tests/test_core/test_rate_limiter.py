@@ -10,47 +10,51 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
-from app.middleware.rate_limiter import SlidingWindowCounter, RateLimiterMiddleware
+from app.middleware.rate_limiter import RateLimiterMiddleware, SlidingWindowCounter
 
 
 class TestSlidingWindowCounter:
-    """滑动窗口计数器测试"""
+    """滑动窗口计数器测试
+
+    真实 API: SlidingWindowCounter(window_seconds, max_requests)；
+    is_allowed() 判定并记录请求；current_count 为动态计算的 property。
+    """
 
     def test_initial_count_zero(self):
-        counter = SlidingWindowCounter(window_size=60)
-        assert counter.current_count() == 0
+        counter = SlidingWindowCounter(window_seconds=60)
+        assert counter.current_count == 0
 
-    def test_increment_increases_count(self):
-        counter = SlidingWindowCounter(window_size=60)
-        counter.record()
-        counter.record()
-        assert counter.current_count() == 2
+    def test_is_allowed_records_request(self):
+        counter = SlidingWindowCounter(window_seconds=60)
+        assert counter.is_allowed()
+        assert counter.is_allowed()
+        assert counter.current_count == 2
 
-    def test_cleanup_removes_expired(self):
-        counter = SlidingWindowCounter(window_size=0.01)  # 10ms window
-        counter.record()
-        counter.record()
-        assert counter.current_count() == 2
+    def test_expired_entries_no_longer_counted(self):
+        counter = SlidingWindowCounter(window_seconds=0.01)
+        assert counter.is_allowed()
+        assert counter.is_allowed()
+        assert counter.current_count == 2
         time.sleep(0.02)
-        counter.cleanup()
-        assert counter.current_count() == 0
+        # current_count 动态过滤窗口外记录
+        assert counter.current_count == 0
 
     def test_is_allowed_within_limit(self):
-        counter = SlidingWindowCounter(window_size=60)
-        assert counter.is_allowed(max_requests=5)
+        counter = SlidingWindowCounter(window_seconds=60, max_requests=5)
+        assert counter.is_allowed()
 
-    def test_is_allowed_blocked(self):
-        counter = SlidingWindowCounter(window_size=60)
-        for _ in range(10):
-            counter.record()
-        assert not counter.is_allowed(max_requests=5)
+    def test_is_allowed_blocked_at_limit(self):
+        counter = SlidingWindowCounter(window_seconds=60, max_requests=5)
+        for _ in range(5):
+            assert counter.is_allowed()
+        assert not counter.is_allowed()
 
-    def test_decrement(self):
-        counter = SlidingWindowCounter(window_size=60)
-        counter.record()
-        counter.record()
-        counter.decrement()
-        assert counter.current_count() == 1
+    def test_window_expiry_restores_allowance(self):
+        counter = SlidingWindowCounter(window_seconds=0.01, max_requests=1)
+        assert counter.is_allowed()
+        assert not counter.is_allowed()
+        time.sleep(0.02)
+        assert counter.is_allowed()
 
 
 class TestRateLimiterMiddleware:
@@ -89,12 +93,13 @@ class TestRateLimiterMiddleware:
     def test_rate_limit_returns_429(self, app_with_rate_limiter):
         client = TestClient(app_with_rate_limiter)
         # 会话速率限制 10 req/min
-        for i in range(15):
+        for _i in range(15):
             response = client.get("/api/test?session_id=ratelimit_test")
             if response.status_code == 429:
                 data = response.json()
-                assert "retry_after_seconds" in data
-                assert "限流" in data.get("detail", "")
+                # 统一响应封装: {code, message, data}
+                assert "retry_after_seconds" in data["data"]
+                assert "频繁" in data["message"]
                 return
         pytest.fail("Expected 429 but never got one after 15 requests")
 
@@ -102,7 +107,7 @@ class TestRateLimiterMiddleware:
         client = TestClient(app_with_rate_limiter)
         # Session A: send many requests
         for _ in range(12):
-            resp_a = client.get("/api/test?session_id=session_a")
+            client.get("/api/test?session_id=session_a")
         # Session B: should still pass
         resp_b = client.get("/api/test?session_id=session_b")
         assert resp_b.status_code == 200

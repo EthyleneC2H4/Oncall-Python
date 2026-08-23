@@ -1,13 +1,12 @@
 """知识图谱接口 - 提供告警关联分析、级联预测和图谱更新的 REST API"""
 
-from typing import Optional
 
 from fastapi import APIRouter
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from app.services.knowledge_graph_service import knowledge_graph_service
 from app.services.kg_extractor import kg_extractor
+from app.services.knowledge_graph_service import knowledge_graph_service
 
 router = APIRouter()
 
@@ -45,11 +44,13 @@ async def predict_cascade(alert_keyword: str):
 
 class ExtractRequest(BaseModel):
     """文档三元组抽取请求"""
+
     text: str = Field(description="文档文本内容")
 
 
 class IncidentLearnRequest(BaseModel):
     """故障事件学习请求"""
+
     incident_id: str = Field(default="manual", description="事件ID")
     alert_type: str = Field(description="告警类型")
     root_cause: str = Field(default="", description="根因")
@@ -82,7 +83,7 @@ async def extract_and_update(request: ExtractRequest):
             "triples_extracted": len(triples),
             "triples": [t.model_dump() for t in triples],
             **stats,
-        }
+        },
     }
 
 
@@ -104,7 +105,6 @@ async def get_full_graph():
 
     返回节点和边的列表，适配 vis-network / D3.js 等前端图可视化库。
     """
-    import networkx as nx
 
     graph = knowledge_graph_service.graph
 
@@ -118,13 +118,15 @@ async def get_full_graph():
             "action": "#27ae60",
             "tool": "#3498db",
         }
-        nodes.append({
-            "id": node_id,
-            "label": data.get("label", node_id),
-            "type": node_type,
-            "color": color_map.get(node_type, "#95a5a6"),
-            "metadata": {k: v for k, v in data.items() if k not in ("label", "type")},
-        })
+        nodes.append(
+            {
+                "id": node_id,
+                "label": data.get("label", node_id),
+                "type": node_type,
+                "color": color_map.get(node_type, "#95a5a6"),
+                "metadata": {k: v for k, v in data.items() if k not in ("label", "type")},
+            }
+        )
 
     edges = []
     for src, dst, data in graph.edges(data=True):
@@ -137,19 +139,21 @@ async def get_full_graph():
             "USES": {"color": "#3498db", "dashes": True},
         }
         style = edge_style.get(relation, {"color": "#95a5a6", "dashes": False})
-        edges.append({
-            "from": src,
-            "to": dst,
-            "label": relation,
-            "color": style["color"],
-            "dashes": style["dashes"],
-            "reason": data.get("reason", ""),
-        })
+        edges.append(
+            {
+                "from": src,
+                "to": dst,
+                "label": relation,
+                "color": style["color"],
+                "dashes": style["dashes"],
+                "reason": data.get("reason", ""),
+            }
+        )
 
     return {
         "code": 200,
         "data": {
             "nodes": nodes,
             "edges": edges,
-        }
+        },
     }

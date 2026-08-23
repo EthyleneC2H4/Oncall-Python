@@ -6,7 +6,7 @@
 - HALF_OPEN: 冷却期过后放行探测请求
 
 用法:
-    breaker = CircuitBreaker("dashscope_llm")
+    breaker = CircuitBreaker("llm")
     try:
         breaker.before_call()
         result = await some_api_call()
@@ -18,15 +18,14 @@
         raise
 """
 
-import time
 import threading
-from enum import Enum
-from typing import Dict
+import time
+from enum import StrEnum
 
 from loguru import logger
 
 
-class CircuitState(str, Enum):
+class CircuitState(StrEnum):
     CLOSED = "closed"
     OPEN = "open"
     HALF_OPEN = "half_open"
@@ -71,6 +70,12 @@ class CircuitBreaker:
                     )
             return self._state
 
+    @property
+    def failure_count(self) -> int:
+        """当前连续失败次数（只读观测，供健康检查/监控使用）"""
+        with self._lock:
+            return self._failure_count
+
     def before_call(self) -> None:
         """调用前检查，OPEN 状态直接抛出异常"""
         current = self.state  # 触发 OPEN→HALF_OPEN 转换检查
@@ -108,7 +113,7 @@ class CircuitBreaker:
 
 # ---------- 全局熔断器注册表 ----------
 
-_breakers: Dict[str, CircuitBreaker] = {}
+_breakers: dict[str, CircuitBreaker] = {}
 _registry_lock = threading.Lock()
 
 
@@ -121,15 +126,19 @@ def get_breaker(name: str) -> CircuitBreaker:
 
 
 # 预注册核心服务熔断器
-BREAKER_LLM = "dashscope_llm"
-BREAKER_EMBEDDING = "dashscope_embedding"
-BREAKER_RERANK = "dashscope_rerank"
+BREAKER_LLM = "llm"
+BREAKER_EMBEDDING = "embedding"
+BREAKER_RERANK = "rerank"
 BREAKER_MILVUS = "milvus"
 BREAKER_MCP_CLS = "mcp_cls"
 BREAKER_MCP_MONITOR = "mcp_monitor"
 
 for _name in [
-    BREAKER_LLM, BREAKER_EMBEDDING, BREAKER_RERANK,
-    BREAKER_MILVUS, BREAKER_MCP_CLS, BREAKER_MCP_MONITOR,
+    BREAKER_LLM,
+    BREAKER_EMBEDDING,
+    BREAKER_RERANK,
+    BREAKER_MILVUS,
+    BREAKER_MCP_CLS,
+    BREAKER_MCP_MONITOR,
 ]:
     get_breaker(_name)

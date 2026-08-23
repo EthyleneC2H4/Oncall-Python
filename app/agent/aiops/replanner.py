@@ -4,36 +4,38 @@ Replanner 节点：重新规划或生成最终响应
 """
 
 from textwrap import dedent
-from typing import Dict, Any, List
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_qwq import ChatQwen
-from pydantic import BaseModel, Field
-from loguru import logger
+from typing import Any
 
-from app.config import config
-from app.tools import get_current_time, retrieve_knowledge, query_alert_graph, predict_alert_cascade
+from langchain_core.prompts import ChatPromptTemplate
+from loguru import logger
+from pydantic import BaseModel, Field
+
 from app.agent.mcp_client import get_mcp_client_with_retry
+from app.config import config
+from app.core.llm_factory import LLMFactory
+from app.tools import get_current_time, predict_alert_cascade, query_alert_graph, retrieve_knowledge
+
 from .state import PlanExecuteState
 from .utils import format_tools_description
 
 
 class Response(BaseModel):
     """最终响应的格式"""
+
     response: str = Field(description="对用户的最终响应")
 
 
 class Act(BaseModel):
     """重新规划的输出格式"""
-    action: str = Field(
-        description="""下一步的行动，必须是以下三种之一：
+
+    action: str = Field(description="""下一步的行动，必须是以下三种之一：
         - 'continue': 当前计划合理，继续执行下一个步骤
         - 'replan': 当前计划需要调整，提供新的步骤列表
-        - 'respond': 计划已完成且信息充足，生成最终响应"""
-    )
+        - 'respond': 计划已完成且信息充足，生成最终响应""")
     # action 为 'replan' 时，新的步骤列表（会替换当前剩余计划）
-    new_steps: List[str] = Field(
+    new_steps: list[str] = Field(
         default_factory=list,
-        description="新的步骤列表（如果 action 是 'replan'，这些步骤会替换剩余计划）"
+        description="新的步骤列表（如果 action 是 'replan'，这些步骤会替换剩余计划）",
     )
 
 
@@ -41,6 +43,7 @@ def _get_replanner_prompt_text() -> str:
     """获取 Replanner Prompt，优先从版本化管理器加载"""
     try:
         from app.core.prompt_manager import prompt_manager
+
         template = prompt_manager.get("replanner")
         if template:
             logger.debug(f"加载 Replanner Prompt 模板: v{template.version}")
@@ -95,6 +98,7 @@ def _get_response_prompt_text() -> str:
     """获取 Response Prompt，优先从版本化管理器加载"""
     try:
         from app.core.prompt_manager import prompt_manager
+
         template = prompt_manager.get("response")
         if template:
             return template.content
@@ -129,7 +133,7 @@ response_prompt = ChatPromptTemplate.from_messages(
 )
 
 
-async def replanner(state: PlanExecuteState) -> Dict[str, Any]:
+async def replanner(state: PlanExecuteState) -> dict[str, Any]:
     """
     重新规划节点：决定是继续、调整计划还是生成最终响应
 
@@ -150,22 +154,16 @@ async def replanner(state: PlanExecuteState) -> Dict[str, Any]:
     # ⚠️ 循环检测：检查是否在重复执行相同步骤
     if _detect_loop(past_steps):
         logger.warning("检测到 Replanner 循环（重复步骤），强制生成响应")
-        llm = ChatQwen(
-            model=config.rag_model,
-            api_key=config.dashscope_api_key,
-            temperature=0
-        )
+        llm = LLMFactory.create_chat_model(streaming=False, model=config.rag_model, temperature=0)
         return await _generate_response(state, llm)
 
     # ⚠️ 强制限制：如果已执行步骤过多，直接生成响应
     MAX_STEPS = 8
     if len(past_steps) >= MAX_STEPS:
-        logger.warning(f"已执行 {len(past_steps)} 个步骤，超过最大限制 {MAX_STEPS}，强制生成最终响应")
-        llm = ChatQwen(
-            model=config.rag_model,
-            api_key=config.dashscope_api_key,
-            temperature=0
+        logger.warning(
+            f"已执行 {len(past_steps)} 个步骤，超过最大限制 {MAX_STEPS}，强制生成最终响应"
         )
+        llm = LLMFactory.create_chat_model(streaming=False, model=config.rag_model, temperature=0)
         return await _generate_response(state, llm)
 
     # 获取可用工具列表
@@ -193,17 +191,12 @@ async def replanner(state: PlanExecuteState) -> Dict[str, Any]:
         tools_description = "无法获取工具列表"
 
     # 创建 LLM
-    llm = ChatQwen(
-        model=config.rag_model,
-        api_key=config.dashscope_api_key,
-        temperature=0
-    )
+    llm = LLMFactory.create_chat_model(streaming=False, model=config.rag_model, temperature=0)
 
     # 格式化已执行的步骤
-    steps_summary = "\n".join([
-        f"步骤: {step}\n结果: {result[:300]}..."
-        for step, result in past_steps
-    ])
+    steps_summary = "\n".join(
+        [f"步骤: {step}\n结果: {result[:300]}..." for step, result in past_steps]
+    )
 
     # 如果还有剩余计划，进行决策
     if plan:
@@ -216,13 +209,15 @@ async def replanner(state: PlanExecuteState) -> Dict[str, Any]:
                 ("user", f"原始任务: {input_text}"),
                 ("user", f"已执行的步骤:\n{steps_summary}"),
                 ("user", f"剩余计划: {', '.join(plan)}"),
-                ("user", f"⚠️ 重要提示：已执行 {len(past_steps)} 个步骤，请优先考虑是否信息已足够生成响应（respond）")
+                (
+                    "user",
+                    f"⚠️ 重要提示：已执行 {len(past_steps)} 个步骤，请优先考虑是否信息已足够生成响应（respond）",
+                ),
             ]
 
-            act = await replanner_chain.ainvoke({
-                "messages": messages,
-                "tools_description": tools_description
-            })
+            act = await replanner_chain.ainvoke(
+                {"messages": messages, "tools_description": tools_description}
+            )
 
             # 处理返回结果
             if isinstance(act, Act):
@@ -230,8 +225,8 @@ async def replanner(state: PlanExecuteState) -> Dict[str, Any]:
                 new_steps = act.new_steps
             else:
                 # 如果返回的是字典
-                action = act.get("action", "continue")  # type: ignore
-                new_steps = act.get("new_steps", [])  # type: ignore
+                action = act.get("action", "continue")
+                new_steps = act.get("new_steps", [])
 
             logger.info(f"Replanner 决策: {action}")
 
@@ -246,13 +241,13 @@ async def replanner(state: PlanExecuteState) -> Dict[str, Any]:
                         f"新步骤数 {len(new_steps)} > 剩余步骤数 {len(plan)}，"
                         f"强制截断为 {len(plan)} 个步骤"
                     )
-                    new_steps = new_steps[:len(plan)]
-                
+                    new_steps = new_steps[: len(plan)]
+
                 # ⚠️ 二次检查：如果已执行步骤 >= 5，禁止 replan
                 if len(past_steps) >= 5:
                     logger.warning(f"已执行 {len(past_steps)} 个步骤，禁止重新规划，强制生成响应")
                     return await _generate_response(state, llm)
-                
+
                 logger.info(f"决定调整计划，新步骤数量: {len(new_steps)}")
                 if new_steps:
                     # 替换剩余计划
@@ -275,7 +270,7 @@ async def replanner(state: PlanExecuteState) -> Dict[str, Any]:
         return await _generate_response(state, llm)
 
 
-async def _generate_response(state: PlanExecuteState, llm: ChatQwen) -> Dict[str, Any]:
+async def _generate_response(state: PlanExecuteState, llm) -> dict[str, Any]:
     """生成最终响应"""
     logger.info("生成最终响应...")
 
@@ -283,10 +278,9 @@ async def _generate_response(state: PlanExecuteState, llm: ChatQwen) -> Dict[str
     past_steps = state.get("past_steps", [])
 
     # 格式化执行历史
-    execution_history = "\n\n".join([
-        f"### 步骤: {step}\n**结果:**\n{result}"
-        for step, result in past_steps
-    ])
+    execution_history = "\n\n".join(
+        [f"### 步骤: {step}\n**结果:**\n{result}" for step, result in past_steps]
+    )
 
     response_gen = response_prompt | llm.with_structured_output(Response)
 
@@ -294,7 +288,7 @@ async def _generate_response(state: PlanExecuteState, llm: ChatQwen) -> Dict[str
         messages = [
             ("user", f"原始任务: {input_text}"),
             ("user", f"执行历史:\n{execution_history}"),
-            ("user", "请基于以上信息生成全面的最终响应")
+            ("user", "请基于以上信息生成全面的最终响应"),
         ]
 
         response_obj = await response_gen.ainvoke({"messages": messages})
@@ -304,7 +298,7 @@ async def _generate_response(state: PlanExecuteState, llm: ChatQwen) -> Dict[str
             final_response = response_obj.response
         else:
             # 如果返回的是字典
-            final_response = response_obj.get("response", "")  # type: ignore
+            final_response = response_obj.get("response", "")
 
         logger.info(f"最终响应生成完成，长度: {len(final_response)}")
 
@@ -344,19 +338,20 @@ def _detect_loop(past_steps: list) -> bool:
     """检测 Agent 是否在重复执行相同步骤
 
     两种检测：
-    1. 精确重复：最近 4 步中某步出现 2+ 次
+    1. 精确重复：最近 4 步中某步出现 2+ 次（连续两步完全相同即是循环）
     2. 模糊重复：最近 2 步 token 重叠度 > 80%
 
     Returns:
         True 表示检测到循环
     """
-    if len(past_steps) < 3:
+    if len(past_steps) < 2:
         return False
 
     recent = [step[0].strip().lower() for step in past_steps[-4:]]
 
     # 精确重复检测
     from collections import Counter
+
     counts = Counter(recent)
     if any(c >= 2 for c in counts.values()):
         return True
@@ -365,6 +360,11 @@ def _detect_loop(past_steps: list) -> bool:
     if len(recent) >= 2:
         tokens_a = set(recent[-1].split())
         tokens_b = set(recent[-2].split())
+        # 中文等无空格文本按字符 bigram 比较，避免整句单 token 导致无法度量相似度
+        if len(tokens_a) <= 1 and len(recent[-1]) > 1:
+            tokens_a = {recent[-1][i : i + 2] for i in range(len(recent[-1]) - 1)}
+        if len(tokens_b) <= 1 and len(recent[-2]) > 1:
+            tokens_b = {recent[-2][i : i + 2] for i in range(len(recent[-2]) - 1)}
         if tokens_a and tokens_b:
             overlap = len(tokens_a & tokens_b) / max(len(tokens_a), len(tokens_b))
             if overlap > 0.8:

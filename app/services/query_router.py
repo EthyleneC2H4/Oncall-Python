@@ -10,29 +10,72 @@
 import json
 import re
 
-from langchain_qwq import ChatQwen
 from loguru import logger
 
 from app.config import config
-
+from app.core.llm_factory import LLMFactory
 
 # 意图分类关键词规则（快速规则优先，LLM 兜底）
 _DIAGNOSTIC_KEYWORDS = [
-    "告警", "alert", "报警", "异常", "故障", "宕机", "crash", "oom",
-    "cpu高", "内存高", "磁盘满", "响应慢", "超时", "不可用", "错误率",
-    "down", "error", "fail", "timeout", "unavailable", "high cpu",
-    "high memory", "disk full", "slow response",
+    "告警",
+    "alert",
+    "报警",
+    "异常",
+    "故障",
+    "宕机",
+    "crash",
+    "oom",
+    "cpu高",
+    "内存高",
+    "磁盘满",
+    "响应慢",
+    "超时",
+    "不可用",
+    "错误率",
+    "down",
+    "error",
+    "fail",
+    "timeout",
+    "unavailable",
+    "high cpu",
+    "high memory",
+    "disk full",
+    "slow response",
 ]
 
 _KNOWLEDGE_KEYWORDS = [
-    "怎么", "如何", "什么是", "步骤", "方法", "教程", "文档",
-    "how to", "what is", "guide", "tutorial", "best practice",
-    "排查", "处理", "解决", "配置", "部署", "安装",
+    "怎么",
+    "如何",
+    "什么是",
+    "步骤",
+    "方法",
+    "教程",
+    "文档",
+    "how to",
+    "what is",
+    "guide",
+    "tutorial",
+    "best practice",
+    "排查",
+    "处理",
+    "解决",
+    "配置",
+    "部署",
+    "安装",
 ]
 
 _CHITCHAT_KEYWORDS = [
-    "你好", "hello", "hi", "谢谢", "thanks", "再见", "bye",
-    "你是谁", "who are you", "帮助", "help",
+    "你好",
+    "hello",
+    "hi",
+    "谢谢",
+    "thanks",
+    "再见",
+    "bye",
+    "你是谁",
+    "who are you",
+    "帮助",
+    "help",
 ]
 
 
@@ -58,9 +101,9 @@ class QueryRouter:
     @property
     def llm(self):
         if self._llm is None:
-            self._llm = ChatQwen(
+            self._llm = LLMFactory.create_chat_model(
+                streaming=False,
                 model=config.rag_model,
-                api_key=config.dashscope_api_key,
                 temperature=0,
             )
         return self._llm
@@ -118,13 +161,11 @@ class QueryRouter:
 
         # LLM 兜底分类
         try:
-            result = await self.llm.ainvoke(
-                self.INTENT_PROMPT.format(query=query)
-            )
+            result = await self.llm.ainvoke(self.INTENT_PROMPT.format(query=query))
             content = result.content.strip()
 
             # 提取 JSON
-            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            json_match = re.search(r"\{.*\}", content, re.DOTALL)
             if json_match:
                 parsed = json.loads(json_match.group())
                 intent = parsed.get("intent", "KNOWLEDGE")

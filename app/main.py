@@ -4,19 +4,20 @@
 集成工程化组件：可观测性、限流、输入安全、审计日志。
 """
 
+import os
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from contextlib import asynccontextmanager
-import os
-
-from app.config import config
+from fastapi.staticfiles import StaticFiles
 from loguru import logger
-from app.api import chat, health, file, aiops, kg, multi_diag, feedback
-from app.core.milvus_client import milvus_manager
+
+from app.api import aiops, chat, feedback, file, health, kg, multi_diag
+from app.config import config
+from app.core.circuit_breaker import BREAKER_MILVUS, get_breaker
 from app.core.health_registry import health_registry
-from app.core.circuit_breaker import get_breaker, BREAKER_MILVUS
+from app.core.milvus_client import milvus_manager
 
 
 @asynccontextmanager
@@ -32,6 +33,7 @@ async def lifespan(app: FastAPI):
     # 初始化 Prompt 模板管理器
     try:
         from app.core.prompt_manager import prompt_manager
+
         templates = prompt_manager.list_templates()
         logger.info(f"📋 Prompt 模板加载: {len(templates)} 个")
     except Exception as e:
@@ -39,17 +41,19 @@ async def lifespan(app: FastAPI):
 
     # 初始化审计日志
     from app.core.audit import audit_logger
+
     logger.info(f"📝 审计日志: {audit_logger.audit_file}")
 
     # 初始化工具注册中心
     from app.tools.tool_registry import tool_registry
+
     logger.info(f"🔧 工具注册: {len(tool_registry.list_tools())} 个")
 
     # 注册健康探针
     health_registry.register("milvus", _probe_milvus)
-    health_registry.register("dashscope_llm")
-    health_registry.register("dashscope_embedding")
-    health_registry.register("dashscope_rerank")
+    health_registry.register("llm")
+    health_registry.register("embedding")
+    health_registry.register("rerank")
     health_registry.register("mcp_cls")
     health_registry.register("mcp_monitor")
 
@@ -88,7 +92,7 @@ app = FastAPI(
     title=config.app_name,
     version=config.app_version,
     description="基于 LangChain 的智能oncall运维系统",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # 配置 CORS
@@ -101,8 +105,8 @@ app.add_middleware(
 )
 
 # 注册工程化中间件
-from app.middleware.rate_limiter import RateLimiterMiddleware
-from app.middleware.request_guard import RequestGuardMiddleware
+from app.middleware.rate_limiter import RateLimiterMiddleware  # noqa: E402
+from app.middleware.request_guard import RequestGuardMiddleware  # noqa: E402
 
 app.add_middleware(RequestGuardMiddleware)
 app.add_middleware(RateLimiterMiddleware)
@@ -120,6 +124,7 @@ app.include_router(feedback.router, prefix="/api", tags=["反馈与评测"])
 static_dir = "static"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+
 @app.get("/")
 async def root():
     """返回首页"""
@@ -129,17 +134,13 @@ async def root():
     return {
         "message": f"Welcome to {config.app_name} API",
         "version": config.app_version,
-        "docs": "/docs"
+        "docs": "/docs",
     }
 
 
 if __name__ == "__main__":
     import uvicorn
-    
+
     uvicorn.run(
-        "app.main:app",
-        host=config.host,
-        port=config.port,
-        reload=config.debug,
-        log_level="info"
+        "app.main:app", host=config.host, port=config.port, reload=config.debug, log_level="info"
     )

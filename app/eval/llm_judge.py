@@ -6,10 +6,9 @@
 """
 
 from loguru import logger
-from langchain_qwq import ChatQwen
 
 from app.config import config
-
+from app.core.llm_factory import LLMFactory
 
 FAITHFULNESS_PROMPT = """你是一个严格的事实核查评审员。请判断以下回答中的每个论断是否可以从给定的上下文中推导出来。
 
@@ -56,9 +55,9 @@ class LLMJudge:
     @property
     def llm(self):
         if self._llm is None:
-            self._llm = ChatQwen(
+            self._llm = LLMFactory.create_chat_model(
+                streaming=False,
                 model=config.rag_model,
-                api_key=config.dashscope_api_key,
                 temperature=0,
             )
         return self._llm
@@ -129,20 +128,22 @@ class LLMJudge:
         content = content.strip()
         # 尝试直接解析
         try:
-            return json.loads(content)
+            parsed: dict = json.loads(content)
+            return parsed
         except json.JSONDecodeError:
             pass
 
         # 提取 JSON
-        match = re.search(r'\{.*?\}', content, re.DOTALL)
+        match = re.search(r"\{.*?\}", content, re.DOTALL)
         if match:
             try:
-                return json.loads(match.group())
+                parsed_match: dict = json.loads(match.group())
+                return parsed_match
             except json.JSONDecodeError:
                 pass
 
         # 尝试提取数字
-        score_match = re.search(r'(\d)', content)
+        score_match = re.search(r"(\d)", content)
         score = int(score_match.group(1)) if score_match else 0
         return {"score": score, "reason": content[:200]}
 

@@ -9,11 +9,9 @@
 import time
 import uuid
 from contextlib import contextmanager
-from typing import Any, Optional
+from typing import Any
 
 from loguru import logger
-
-from app.config import config
 
 
 class TraceSpan:
@@ -25,7 +23,7 @@ class TraceSpan:
         self.trace_id = trace_id
         self.metadata = metadata or {}
         self.start_time = time.time()
-        self.end_time: Optional[float] = None
+        self.end_time: float | None = None
         self.status = "running"
         self.output: Any = None
 
@@ -117,7 +115,7 @@ class Trace:
 
     @property
     def total_cost(self) -> float:
-        return sum(g.get("cost", 0) for g in self.generations)
+        return float(sum(g.get("cost", 0) for g in self.generations))
 
     def to_dict(self) -> dict:
         return {
@@ -172,6 +170,7 @@ class TracingManager:
             trace.summary_log()
             # 将 Trace 写入审计日志
             from app.core.audit import audit_logger
+
             audit_logger.log_trace(trace)
 
     @property

@@ -10,7 +10,6 @@
 import os
 import time
 from pathlib import Path
-from typing import Any
 
 import yaml
 from loguru import logger
@@ -49,9 +48,7 @@ class PromptTemplate:
         # 校验必需变量
         for var in self.variables:
             if var.get("required", False) and var["name"] not in kwargs:
-                raise ValueError(
-                    f"Prompt '{self.name}' 缺少必需变量: {var['name']}"
-                )
+                raise ValueError(f"Prompt '{self.name}' 缺少必需变量: {var['name']}")
 
         # 渲染
         rendered = self.content
@@ -106,7 +103,7 @@ class PromptManager:
             mtime = file_path.stat().st_mtime
             self._file_mtimes[str(file_path)] = mtime
 
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 data = yaml.safe_load(f)
 
             if not data or "name" not in data:

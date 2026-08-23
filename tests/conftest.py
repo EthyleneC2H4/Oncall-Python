@@ -1,52 +1,90 @@
 """pytest 共享 fixtures 和配置
 
 为 OnCall 项目提供测试基础设施：
-- Mock 外部依赖（DashScope、Milvus、MCP）
+- Mock 外部依赖（OpenRouter LLM、本地 Embedding、Milvus、MCP）
 - 环境变量注入
 - 隔离的审计日志和缓存实例
 """
 
-import os
-import sys
 import json
-import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ──────────────── 路径与环境 ────────────────
+
 
 @pytest.fixture(autouse=True)
 def _patch_project_root(monkeypatch):
     """确保所有路径计算基于项目根目录"""
     project_root = Path(__file__).resolve().parent.parent
     monkeypatch.chdir(project_root)
-    # 模拟 os.environ 中不存在 DASHSCOPE_API_KEY 时 config 不会崩溃
-    monkeypatch.setenv("DASHSCOPE_API_KEY", "test-api-key-for-testing")
+    # 注入假 API Key：保证 ChatOpenAI 可构造（不发真实请求）
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-api-key-for-testing")
     return project_root
 
 
 # ──────────────── 外部服务 Mock ────────────────
 
+
+def make_fake_llm(response=None):
+    """构造 LLMFactory.create_chat_model 的返回替身
+
+    覆盖三种调用路径：
+    - llm.ainvoke / llm.invoke          （直接调用）
+    - llm.with_structured_output(...).ainvoke（结构化输出链，planner/replanner 使用）
+    - llm.bind_tools(...).ainvoke       （工具绑定，executor/agent 使用）
+    """
+    default_response = MagicMock(
+        content="这是一个测试回答",
+        usage_metadata={"input_tokens": 100, "output_tokens": 50},
+    )
+    llm = MagicMock(name="FakeChatModel")
+    llm.ainvoke = AsyncMock(return_value=response if response is not None else default_response)
+    llm.invoke = MagicMock(return_value=MagicMock(content="测试回答"))
+
+    structured = MagicMock(name="FakeStructuredLLM")
+    structured.ainvoke = llm.ainvoke  # 共享响应序列
+    structured.invoke = llm.invoke
+    llm.with_structured_output = MagicMock(return_value=structured)
+    llm.bind_tools = MagicMock(return_value=llm)
+    return llm
+
+
 @pytest.fixture
-def mock_chat_qwen():
-    """Mock ChatQwen，返回固定回答"""
-    with patch("langchain_qwq.ChatQwen", autospec=True) as mock_cls:
-        instance = mock_cls.return_value
-        instance.ainvoke = AsyncMock()
-        instance.ainvoke.return_value = MagicMock(
-            content="这是一个测试回答",
-            usage_metadata={"input_tokens": 100, "output_tokens": 50},
-        )
-        instance.invoke = MagicMock(return_value=MagicMock(content="测试回答"))
-        yield mock_cls
+def mock_llm_factory():
+    """Mock LLMFactory.create_chat_model，所有模型请求均返回固定替身"""
+    fake_llm = make_fake_llm()
+    with patch("app.core.llm_factory.LLMFactory.create_chat_model", return_value=fake_llm) as m:
+        m.fake_llm = fake_llm  # 测试可进一步定制响应
+        yield m
+
+
+@pytest.fixture
+def mock_embeddings():
+    """Mock 本地 BGE Embedding 服务（避免下载/加载真实模型）"""
+    fake_vector = [0.1] * 1024
+    with (
+        patch(
+            "app.services.vector_embedding_service.vector_embedding_service.embed_query",
+            return_value=fake_vector,
+        ),
+        patch(
+            "app.services.vector_embedding_service.vector_embedding_service.embed_query_safe",
+            return_value=fake_vector,
+        ),
+        patch(
+            "app.services.vector_embedding_service.vector_embedding_service.embed_documents",
+            return_value=[fake_vector],
+        ),
+    ):
+        yield
 
 
 @pytest.fixture
 def mock_openai_client():
-    """Mock OpenAI client（DashScope 兼容模式）"""
+    """Mock OpenAI client（OpenRouter OpenAI 兼容端点）"""
     with patch("openai.OpenAI", autospec=True) as mock_cls:
         instance = mock_cls.return_value
         instance.embeddings.create.return_value = MagicMock(
@@ -79,6 +117,7 @@ def mock_mcp_client():
 
 # ──────────────── 隔离的审计日志 ────────────────
 
+
 @pytest.fixture
 def temp_audit_dir(monkeypatch, tmp_path):
     """使用临时目录存放审计日志"""
@@ -90,16 +129,18 @@ def temp_audit_dir(monkeypatch, tmp_path):
 
 # ──────────────── 隔离的缓存 ────────────────
 
+
 @pytest.fixture
 def clean_cache():
     """干净的 TTLCache 实例"""
     from app.core.cache import TTLCache
 
-    cache = TTLCache(max_size=10, ttl=60)
+    cache = TTLCache(name="test", maxsize=10, ttl_seconds=60)
     return cache
 
 
 # ──────────────── 数据集 Fixtures ────────────────
+
 
 @pytest.fixture
 def sample_diagnostic_case():
@@ -156,11 +197,13 @@ def sample_dataset_dir(tmp_path):
 
 # ──────────────── FastAPI TestClient ────────────────
 
+
 @pytest.fixture
-def test_app(mock_chat_qwen, mock_openai_client, mock_milvus, mock_mcp_client):
+def test_app(mock_llm_factory, mock_embeddings, mock_milvus, mock_mcp_client):
     """创建测试用的 FastAPI app（mock 所有外部依赖）"""
-    from app.main import app
     from fastapi.testclient import TestClient
+
+    from app.main import app
 
     # 禁用 lifespan 以避免连接外部服务
     app.router.lifespan = None
@@ -169,6 +212,7 @@ def test_app(mock_chat_qwen, mock_openai_client, mock_milvus, mock_mcp_client):
 
 
 # ──────────────── 通用工具 ────────────────
+
 
 @pytest.fixture
 def assert_json_ok():

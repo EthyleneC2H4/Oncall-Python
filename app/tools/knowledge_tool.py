@@ -9,24 +9,24 @@
 支持 Rerank 精排：使用 cross-encoder 对粗召回结果重排，提升 top-k 精度。
 """
 
-from typing import List, Tuple
 
 from langchain_core.documents import Document
 from langchain_core.tools import tool
 from loguru import logger
 
 from app.config import config
-from app.services.vector_store_manager import vector_store_manager
-from app.services.bm25_retriever import bm25_retriever
-from app.services.reranker import reranker
-from app.services.query_rewriter import query_rewriter
-from app.core.health_registry import health_registry
+from app.core.cache import make_cache_key, retrieval_cache
 from app.core.degradation import DegradationLevel
-from app.core.cache import retrieval_cache, make_cache_key
+from app.core.health_registry import health_registry
+from app.core.llm_factory import LLMFactory
+from app.services.bm25_retriever import bm25_retriever
+from app.services.query_rewriter import query_rewriter
+from app.services.reranker import reranker
+from app.services.vector_store_manager import vector_store_manager
 
 
 @tool(response_format="content_and_artifact")
-def retrieve_knowledge(query: str) -> Tuple[str, List[Document]]:
+def retrieve_knowledge(query: str) -> tuple[str, list[Document]]:
     """从知识库中检索相关信息来回答问题
 
     当用户的问题涉及专业知识、文档内容或需要参考资料时，使用此工具。
@@ -57,10 +57,12 @@ def retrieve_knowledge(query: str) -> Tuple[str, List[Document]]:
         filtered_docs = _filter_by_relevance(docs_with_scores, relevance_threshold)
 
         # 限制最终返回数量
-        filtered_docs = filtered_docs[:config.rag_top_k]
+        filtered_docs = filtered_docs[: config.rag_top_k]
 
         if not filtered_docs:
-            logger.warning(f"所有 {len(docs_with_scores)} 条检索结果均不相关 (threshold={relevance_threshold})")
+            logger.warning(
+                f"所有 {len(docs_with_scores)} 条检索结果均不相关 (threshold={relevance_threshold})"
+            )
             return "检索到的文档与问题相关性较低，建议换个问法重试。", []
 
         # 格式化文档为上下文
@@ -73,7 +75,7 @@ def retrieve_knowledge(query: str) -> Tuple[str, List[Document]]:
         return f"检索知识时发生错误: {str(e)}", []
 
 
-async def retrieve_with_hyde(query: str, top_k: int | None = None) -> Tuple[str, List[Document]]:
+async def retrieve_with_hyde(query: str, top_k: int | None = None) -> tuple[str, list[Document]]:
     """HyDE + Query Rewrite + BM25 + Rerank 全链路增强检索
 
     完整链路：
@@ -90,7 +92,6 @@ async def retrieve_with_hyde(query: str, top_k: int | None = None) -> Tuple[str,
     Returns:
         (格式化上下文, 文档列表)
     """
-    from langchain_qwq import ChatQwen
 
     if top_k is None:
         top_k = config.rag_top_k
@@ -102,9 +103,9 @@ async def retrieve_with_hyde(query: str, top_k: int | None = None) -> Tuple[str,
         rewritten_query = await query_rewriter.rewrite(query)
 
         # Step 2: HyDE — 生成假设性答案
-        llm = ChatQwen(
+        llm = LLMFactory.create_chat_model(
+            streaming=False,
             model=config.rag_model,
-            api_key=config.dashscope_api_key,
             temperature=0.3,
         )
         hypothesis = await llm.ainvoke(
@@ -118,12 +119,12 @@ async def retrieve_with_hyde(query: str, top_k: int | None = None) -> Tuple[str,
         # Step 3: 三路并行检索
         # 路径A: 用改写后的查询做向量检索
         rewritten_results = vector_store.similarity_search_with_score(
-            rewritten_query, k=top_k + 3
+            str(rewritten_query), k=top_k + 3
         )
 
         # 路径B: 用假设性答案做向量检索
         hyde_results = vector_store.similarity_search_with_score(
-            hypothesis_text, k=top_k + 3
+            str(hypothesis_text), k=top_k + 3
         )
 
         # 路径C: BM25 关键词检索
@@ -164,7 +165,7 @@ async def retrieve_with_hyde(query: str, top_k: int | None = None) -> Tuple[str,
 
 async def retrieve_with_rewrite_and_rerank(
     query: str, top_k: int | None = None
-) -> Tuple[str, List[Document]]:
+) -> tuple[str, list[Document]]:
     """Query Rewrite + BM25 + Rerank 检索（不含 HyDE，速度更快）
 
     适用于意图明确的查询（如诊断类），不需要 HyDE 假设生成。
@@ -190,16 +191,12 @@ async def retrieve_with_rewrite_and_rerank(
 
         # Step 2: 双路检索
         # 路径A: 向量检索（改写后的查询）
-        vector_results = vector_store.similarity_search_with_score(
-            rewritten_query, k=top_k + 3
-        )
+        vector_results = vector_store.similarity_search_with_score(rewritten_query, k=top_k + 3)
 
         # 路径B: BM25 关键词检索
         bm25_results = bm25_retriever.search(rewritten_query, top_k=top_k + 3)
 
-        logger.info(
-            f"双路检索完成: 向量={len(vector_results)}, BM25={len(bm25_results)}"
-        )
+        logger.info(f"双路检索完成: 向量={len(vector_results)}, BM25={len(bm25_results)}")
 
         # Step 3: RRF 融合
         merged_docs = _rrf_merge(vector_results, bm25_results, top_k=top_k + 4)
@@ -229,7 +226,7 @@ async def retrieve_with_rewrite_and_rerank(
 def _filter_by_relevance(
     docs_with_scores: list,
     threshold: float,
-) -> List[Document]:
+) -> list[Document]:
     """Self-RAG 相关性过滤
 
     Args:
@@ -264,7 +261,7 @@ def _rrf_merge(
     results_b: list,
     top_k: int = 3,
     k: int = 60,
-) -> List[Document]:
+) -> list[Document]:
     """Reciprocal Rank Fusion (RRF) 融合两路检索结果
 
     RRF score = sum(1 / (k + rank_i))
@@ -308,7 +305,7 @@ def _rrf_merge_three(
     results_c: list,
     top_k: int = 5,
     k: int = 60,
-) -> List[Document]:
+) -> list[Document]:
     """RRF 融合三路检索结果
 
     Args:
@@ -342,7 +339,7 @@ def _rrf_merge_three(
 async def retrieve_with_degradation(
     query: str,
     top_k: int | None = None,
-) -> tuple[str, List[Document], DegradationLevel]:
+) -> tuple[str, list[Document], DegradationLevel]:
     """按降级层级检索，逐级降级直到获得结果
 
     Level 0: 完整链路 (向量+BM25+RRF+Rerank)
@@ -365,9 +362,9 @@ async def retrieve_with_degradation(
         ctx, docs = cached
         return ctx, docs, DegradationLevel.CACHED
 
-    milvus_ok = health_registry.is_available("milvus") and health_registry.is_available("dashscope_embedding")
-    rerank_ok = health_registry.is_available("dashscope_rerank")
-    llm_ok = health_registry.is_available("dashscope_llm")
+    milvus_ok = health_registry.is_available("milvus") and health_registry.is_available("embedding")
+    rerank_ok = health_registry.is_available("rerank")
+    llm_ok = health_registry.is_available("llm")
 
     # Level 0: 完整链路
     if milvus_ok and rerank_ok:
@@ -434,14 +431,14 @@ async def retrieve_with_degradation(
     return "没有找到相关信息，请稍后重试。", [], DegradationLevel.TEMPLATE
 
 
-def format_docs(docs: List[Document]) -> str:
+def format_docs(docs: list[Document]) -> str:
     """格式化文档列表为上下文文本
 
     Parent-Child 策略：
     - 如果 metadata 中有 parent_content，使用 parent 内容（更完整的上下文）
     - 按 parent_id 去重，同一 parent 只输出一次
     """
-    formatted_parts = []
+    formatted_parts: list[str] = []
     seen_parents: set[str] = set()
 
     for doc in docs:

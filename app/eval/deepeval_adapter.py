@@ -22,8 +22,8 @@
 - DeepEval Tool Correctness: https://deepeval.com/docs/metrics-tool-correctness
 """
 
-from typing import Any
 from dataclasses import dataclass, field
+from typing import Any
 
 from loguru import logger
 
@@ -31,6 +31,7 @@ from loguru import logger
 @dataclass
 class AgentTrace:
     """Agent 执行轨迹"""
+
     user_input: str
     plan: list[str] = field(default_factory=list)
     tools_called: list[str] = field(default_factory=list)
@@ -44,6 +45,7 @@ class AgentTrace:
 @dataclass
 class AgentEvalResult:
     """Agent 评测结果"""
+
     task_completion_score: float = 0.0
     tool_correctness_score: float = 0.0
     argument_correctness_score: float = 0.0
@@ -60,20 +62,18 @@ class DeepEvalAdapter:
 
     def __init__(self):
         self._evaluator_llm = None
-        self._available = False
+        self._available: bool = False
         self._check_availability()
 
     def _check_availability(self) -> bool:
         """检查 DeepEval 是否可用"""
         try:
             import deepeval  # noqa: F401
+
             self._available = True
             logger.info("DeepEval 可用，启用 Agentic 评测指标")
         except ImportError:
-            logger.warning(
-                "DeepEval 未安装。Agentic 指标不可用。"
-                "安装: pip install deepeval"
-            )
+            logger.warning("DeepEval 未安装。Agentic 指标不可用。" "安装: pip install deepeval")
         return self._available
 
     @property
@@ -103,21 +103,19 @@ class DeepEvalAdapter:
             {"score": float, "passed": bool, "reason": str}
         """
         if not self._available:
-            return self._fallback_tool_correctness(
-                tools_called, expected_tools, threshold
-            )
+            return self._fallback_tool_correctness(tools_called, expected_tools, threshold)
 
         try:
             from deepeval.metrics import ToolCorrectnessMetric
             from deepeval.test_case import LLMTestCase, ToolCall
 
-            actual_tools = [ToolCall(name=t) for t in tools_called]
-            expected = [ToolCall(name=t) for t in expected_tools]
-            available = [ToolCall(name=t) for t in (available_tools or [])]
+            # 注: 当前 deepeval 版本的 ToolCall 必填 input_parameters；
+            # ToolCorrectnessMetric 不再支持 available_tools 参数（候选集约束由调用方保证）
+            actual_tools = [ToolCall(name=t, input_parameters={}) for t in tools_called]
+            expected = [ToolCall(name=t, input_parameters={}) for t in expected_tools]
 
             metric = ToolCorrectnessMetric(
                 threshold=threshold,
-                available_tools=available if available else None,
                 include_reason=True,
             )
 
@@ -129,16 +127,15 @@ class DeepEvalAdapter:
             )
 
             metric.measure(test_case)
+            score = float(metric.score or 0.0)
             return {
-                "score": round(metric.score, 4),
-                "passed": metric.is_successful(),
-                "reason": getattr(metric, "reason", ""),
+                "score": round(score, 4),
+                "passed": bool(metric.is_successful()),
+                "reason": str(getattr(metric, "reason", "")),
             }
         except Exception as e:
             logger.error(f"ToolCorrectness 评测失败: {e}")
-            return self._fallback_tool_correctness(
-                tools_called, expected_tools, threshold
-            )
+            return self._fallback_tool_correctness(tools_called, expected_tools, threshold)
 
     def _fallback_tool_correctness(
         self,
@@ -178,9 +175,7 @@ class DeepEvalAdapter:
             threshold: 通过阈值
         """
         if not self._available:
-            return self._fallback_task_completion(
-                actual_output, expected_output, threshold
-            )
+            return self._fallback_task_completion(actual_output, expected_output, threshold)
 
         try:
             from deepeval.metrics import TaskCompletionMetric
@@ -198,16 +193,15 @@ class DeepEvalAdapter:
             )
 
             metric.measure(test_case)
+            score = float(metric.score or 0.0)
             return {
-                "score": round(metric.score, 4),
+                "score": round(score, 4),
                 "passed": metric.is_successful(),
                 "reason": getattr(metric, "reason", ""),
             }
         except Exception as e:
             logger.error(f"TaskCompletion 评测失败: {e}")
-            return self._fallback_task_completion(
-                actual_output, expected_output, threshold
-            )
+            return self._fallback_task_completion(actual_output, expected_output, threshold)
 
     def _fallback_task_completion(
         self,
@@ -336,18 +330,21 @@ class DeepEvalAdapter:
                 passed = score >= thresholds[key]
                 if not passed:
                     all_passed = False
-                checks.append({
-                    "check": label,
-                    "score": score,
-                    "threshold": thresholds[key],
-                    "passed": passed,
-                })
+                checks.append(
+                    {
+                        "check": label,
+                        "score": score,
+                        "threshold": thresholds[key],
+                        "passed": passed,
+                    }
+                )
 
         return {
             "passed": all_passed,
             "checks": checks,
             "summary": (
-                "所有门禁通过" if all_passed
+                "所有门禁通过"
+                if all_passed
                 else f"{sum(1 for c in checks if not c['passed'])} 项未通过"
             ),
         }

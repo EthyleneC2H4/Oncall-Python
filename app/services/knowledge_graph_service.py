@@ -4,13 +4,11 @@
 支持告警级联链路分析和多跳关联查询。
 """
 
-import json
 import os
 from typing import Any
 
 import networkx as nx
 from loguru import logger
-
 
 # 持久化文件路径
 KG_DATA_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "kg_data.json")
@@ -22,24 +20,62 @@ class KnowledgeGraphService:
     def __init__(self):
         self.graph = nx.DiGraph()
         self._build_default_graph()
-        logger.info(f"知识图谱初始化完成: {self.graph.number_of_nodes()} 节点, {self.graph.number_of_edges()} 边")
+        logger.info(
+            f"知识图谱初始化完成: {self.graph.number_of_nodes()} 节点, {self.graph.number_of_edges()} 边"
+        )
 
     def _build_default_graph(self):
         """从运维文档知识构建默认图谱"""
 
         # ========== 告警类型节点 ==========
         alerts = {
-            "HighCPUUsage": {"level": "critical", "label": "CPU使用率过高", "threshold": "80%持续5分钟"},
-            "HighMemoryUsage": {"level": "critical", "label": "内存使用率过高", "threshold": "85%持续5分钟"},
-            "HighDiskUsage": {"level": "warning", "label": "磁盘使用率过高", "threshold": "80%持续5分钟"},
-            "SlowResponse": {"level": "warning", "label": "响应变慢", "threshold": "P99>3s持续5分钟"},
-            "ServiceUnavailable": {"level": "critical", "label": "服务不可用", "threshold": "健康检查失败或错误率>50%"},
-            "HighErrorRate": {"level": "warning", "label": "高错误率", "threshold": "错误率异常升高"},
-            "DatabaseSlowQuery": {"level": "warning", "label": "数据库慢查询", "threshold": "慢查询数异常"},
+            "HighCPUUsage": {
+                "level": "critical",
+                "label": "CPU使用率过高",
+                "threshold": "80%持续5分钟",
+            },
+            "HighMemoryUsage": {
+                "level": "critical",
+                "label": "内存使用率过高",
+                "threshold": "85%持续5分钟",
+            },
+            "HighDiskUsage": {
+                "level": "warning",
+                "label": "磁盘使用率过高",
+                "threshold": "80%持续5分钟",
+            },
+            "SlowResponse": {
+                "level": "warning",
+                "label": "响应变慢",
+                "threshold": "P99>3s持续5分钟",
+            },
+            "ServiceUnavailable": {
+                "level": "critical",
+                "label": "服务不可用",
+                "threshold": "健康检查失败或错误率>50%",
+            },
+            "HighErrorRate": {
+                "level": "warning",
+                "label": "高错误率",
+                "threshold": "错误率异常升高",
+            },
+            "DatabaseSlowQuery": {
+                "level": "warning",
+                "label": "数据库慢查询",
+                "threshold": "慢查询数异常",
+            },
             "OOMError": {"level": "critical", "label": "内存溢出", "threshold": "OOM Killer触发"},
-            "HealthCheckFailed": {"level": "critical", "label": "健康检查失败", "threshold": "连续检查失败"},
+            "HealthCheckFailed": {
+                "level": "critical",
+                "label": "健康检查失败",
+                "threshold": "连续检查失败",
+            },
             "FrequentGC": {"level": "warning", "label": "GC频繁", "threshold": "GC频率异常"},
-            "DiskIOHigh": {"level": "warning", "label": "磁盘IO过高", "threshold": "IO等待时间过长"},
+            "DiskIOHigh": {
+                "level": "warning",
+                "label": "磁盘IO过高",
+                "threshold": "IO等待时间过长",
+            },
         }
 
         for name, attrs in alerts.items():
@@ -233,9 +269,10 @@ class KnowledgeGraphService:
         """
         if alert_name not in self.graph:
             # 尝试模糊匹配
-            alert_name = self._fuzzy_match_alert(alert_name)
-            if not alert_name:
+            matched = self._fuzzy_match_alert(alert_name)
+            if not matched:
                 return {"error": "未找到匹配的告警类型"}
+            alert_name = matched
 
         node_data = self.graph.nodes[alert_name]
         result = {
@@ -255,17 +292,21 @@ class KnowledgeGraphService:
                 for _, action_target, action_data in self.graph.out_edges(target, data=True):
                     if action_data.get("relation") == "RESOLVED_BY":
                         action_node = self.graph.nodes[action_target]
-                        actions.append({
-                            "name": action_target,
-                            "label": action_node.get("label", ""),
-                            "urgency": action_node.get("urgency", ""),
-                        })
-                result["root_causes"].append({
-                    "name": target,
-                    "label": cause_data.get("label", ""),
-                    "category": cause_data.get("category", ""),
-                    "actions": actions,
-                })
+                        actions.append(
+                            {
+                                "name": action_target,
+                                "label": action_node.get("label", ""),
+                                "urgency": action_node.get("urgency", ""),
+                            }
+                        )
+                result["root_causes"].append(
+                    {
+                        "name": target,
+                        "label": cause_data.get("label", ""),
+                        "category": cause_data.get("category", ""),
+                        "actions": actions,
+                    }
+                )
 
         # 2. 获取级联链路（BFS，最多3层）
         result["cascade_chain"] = self._get_cascade_chain(alert_name, max_depth=3)
@@ -313,9 +354,10 @@ class KnowledgeGraphService:
     def get_cascade_prediction(self, alert_name: str) -> str:
         """获取告警级联预测的可读文本"""
         if alert_name not in self.graph:
-            alert_name = self._fuzzy_match_alert(alert_name)
-            if not alert_name:
+            matched = self._fuzzy_match_alert(alert_name)
+            if not matched:
                 return "未找到匹配的告警类型"
+            alert_name = matched
 
         chains = self._get_cascade_chain(alert_name, max_depth=3)
         if not chains:
@@ -364,7 +406,11 @@ class KnowledgeGraphService:
         if analysis["recommended_actions"]:
             parts.append("\n### 推荐处置动作（按紧急度排序）")
             for action in analysis["recommended_actions"]:
-                urgency_label = {"immediate": "🔴 立即", "short_term": "🟡 短期", "long_term": "🟢 长期"}
+                urgency_label = {
+                    "immediate": "🔴 立即",
+                    "short_term": "🟡 短期",
+                    "long_term": "🟢 长期",
+                }
                 parts.append(f"- {urgency_label.get(action['urgency'], '')} {action['label']}")
 
         return "\n".join(parts)
@@ -400,8 +446,9 @@ class KnowledgeGraphService:
 
         # 精确匹配节点名
         for node in self.graph.nodes:
-            if self.graph.nodes[node].get("type") == "alert" and query_lower in node.lower():
-                return node
+            node_type: object = self.graph.nodes[node].get("type")
+            if node_type == "alert" and query_lower in str(node).lower():
+                return str(node)
 
         return None
 
@@ -431,8 +478,7 @@ class KnowledgeGraphService:
             if t.head not in self.graph:
                 defaults = type_defaults.get(t.head_type, {})
                 self.graph.add_node(
-                    t.head, type=t.head_type, label=t.head,
-                    source="extracted", **defaults
+                    t.head, type=t.head_type, label=t.head, source="extracted", **defaults
                 )
                 nodes_added += 1
 
@@ -440,17 +486,13 @@ class KnowledgeGraphService:
             if t.tail not in self.graph:
                 defaults = type_defaults.get(t.tail_type, {})
                 self.graph.add_node(
-                    t.tail, type=t.tail_type, label=t.tail,
-                    source="extracted", **defaults
+                    t.tail, type=t.tail_type, label=t.tail, source="extracted", **defaults
                 )
                 nodes_added += 1
 
             # 添加关系边（检查是否已存在）
             if not self.graph.has_edge(t.head, t.tail):
-                self.graph.add_edge(
-                    t.head, t.tail,
-                    relation=t.relation, source="extracted"
-                )
+                self.graph.add_edge(t.head, t.tail, relation=t.relation, source="extracted")
                 edges_added += 1
 
         logger.info(f"图谱增量更新: +{nodes_added} 节点, +{edges_added} 边")
@@ -477,8 +519,11 @@ class KnowledgeGraphService:
         # 确保告警节点存在
         if alert_type and alert_type not in self.graph:
             self.graph.add_node(
-                alert_type, type="alert", label=alert_type,
-                level="warning", source=f"incident_{incident_id}"
+                alert_type,
+                type="alert",
+                label=alert_type,
+                level="warning",
+                source=f"incident_{incident_id}",
             )
             nodes_added += 1
 
@@ -486,15 +531,16 @@ class KnowledgeGraphService:
         if alert_type and root_cause:
             if root_cause not in self.graph:
                 self.graph.add_node(
-                    root_cause, type="root_cause", label=root_cause,
-                    category="incident", source=f"incident_{incident_id}"
+                    root_cause,
+                    type="root_cause",
+                    label=root_cause,
+                    category="incident",
+                    source=f"incident_{incident_id}",
                 )
                 nodes_added += 1
             if not self.graph.has_edge(alert_type, root_cause):
                 self.graph.add_edge(
-                    alert_type, root_cause,
-                    relation="CAUSED_BY",
-                    source=f"incident_{incident_id}"
+                    alert_type, root_cause, relation="CAUSED_BY", source=f"incident_{incident_id}"
                 )
                 edges_added += 1
 
@@ -502,15 +548,16 @@ class KnowledgeGraphService:
         if root_cause and resolution:
             if resolution not in self.graph:
                 self.graph.add_node(
-                    resolution, type="action", label=resolution,
-                    urgency="short_term", source=f"incident_{incident_id}"
+                    resolution,
+                    type="action",
+                    label=resolution,
+                    urgency="short_term",
+                    source=f"incident_{incident_id}",
                 )
                 nodes_added += 1
             if not self.graph.has_edge(root_cause, resolution):
                 self.graph.add_edge(
-                    root_cause, resolution,
-                    relation="RESOLVED_BY",
-                    source=f"incident_{incident_id}"
+                    root_cause, resolution, relation="RESOLVED_BY", source=f"incident_{incident_id}"
                 )
                 edges_added += 1
 
@@ -518,22 +565,24 @@ class KnowledgeGraphService:
         for cascade in cascade_alerts:
             if cascade not in self.graph:
                 self.graph.add_node(
-                    cascade, type="alert", label=cascade,
-                    level="warning", source=f"incident_{incident_id}"
+                    cascade,
+                    type="alert",
+                    label=cascade,
+                    level="warning",
+                    source=f"incident_{incident_id}",
                 )
                 nodes_added += 1
             if not self.graph.has_edge(alert_type, cascade):
                 self.graph.add_edge(
-                    alert_type, cascade,
+                    alert_type,
+                    cascade,
                     relation="MAY_TRIGGER",
                     reason=f"来自事件 {incident_id}",
-                    source=f"incident_{incident_id}"
+                    source=f"incident_{incident_id}",
                 )
                 edges_added += 1
 
-        logger.info(
-            f"从事件 {incident_id} 学习: +{nodes_added} 节点, +{edges_added} 边"
-        )
+        logger.info(f"从事件 {incident_id} 学习: +{nodes_added} 节点, +{edges_added} 边")
         return {"nodes_added": nodes_added, "edges_added": edges_added}
 
     def get_graph_stats(self) -> dict:

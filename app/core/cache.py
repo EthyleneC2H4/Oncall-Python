@@ -8,9 +8,7 @@ import hashlib
 import threading
 import time
 from collections import OrderedDict
-from typing import Any, Optional
-
-from loguru import logger
+from typing import Any
 
 
 class TTLCache:
@@ -25,7 +23,7 @@ class TTLCache:
         self._hits = 0
         self._misses = 0
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         with self._lock:
             entry = self._cache.get(key)
             if entry is None:

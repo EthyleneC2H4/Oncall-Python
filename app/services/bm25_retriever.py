@@ -15,7 +15,6 @@
 import os
 import pickle
 import threading
-from typing import List, Tuple
 
 import jieba
 from langchain_core.documents import Document
@@ -37,17 +36,17 @@ class BM25Retriever:
 
     def __init__(self):
         self._bm25: BM25Okapi | None = None
-        self._documents: List[Document] = []
-        self._tokenized_corpus: List[List[str]] = []
+        self._documents: list[Document] = []
+        self._tokenized_corpus: list[list[str]] = []
         self._lock = threading.Lock()
         self._initialized = False
 
-    def _tokenize(self, text: str) -> List[str]:
+    def _tokenize(self, text: str) -> list[str]:
         """中文分词 + 去停用词"""
         tokens = jieba.lcut(text)
         return [t.strip() for t in tokens if len(t.strip()) > 1]
 
-    def _load_documents_from_milvus(self) -> List[Document]:
+    def _load_documents_from_milvus(self) -> list[Document]:
         """从 Milvus 加载所有文档文本"""
         try:
             collection = milvus_manager.get_collection()
@@ -64,10 +63,12 @@ class BM25Retriever:
                 content = item.get("content", "")
                 metadata = item.get("metadata", {})
                 if content:
-                    documents.append(Document(
-                        page_content=content,
-                        metadata=metadata if isinstance(metadata, dict) else {},
-                    ))
+                    documents.append(
+                        Document(
+                            page_content=content,
+                            metadata=metadata if isinstance(metadata, dict) else {},
+                        )
+                    )
 
             logger.info(f"BM25: 从 Milvus 加载 {len(documents)} 篇文档")
             return documents
@@ -76,7 +77,7 @@ class BM25Retriever:
             logger.error(f"BM25: 从 Milvus 加载文档失败: {e}")
             return []
 
-    def build_index(self, documents: List[Document] | None = None):
+    def build_index(self, documents: list[Document] | None = None):
         """构建 BM25 索引
 
         Args:
@@ -94,9 +95,7 @@ class BM25Retriever:
                 return
 
             self._documents = documents
-            self._tokenized_corpus = [
-                self._tokenize(doc.page_content) for doc in documents
-            ]
+            self._tokenized_corpus = [self._tokenize(doc.page_content) for doc in documents]
             self._bm25 = BM25Okapi(self._tokenized_corpus)
             self._initialized = True
             logger.info(f"BM25: 索引构建完成，共 {len(documents)} 篇文档")
@@ -141,7 +140,7 @@ class BM25Retriever:
         if not self._initialized:
             self.build_index()
 
-    def search(self, query: str, top_k: int = 5) -> List[Tuple[Document, float]]:
+    def search(self, query: str, top_k: int = 5) -> list[tuple[Document, float]]:
         """BM25 检索
 
         Args:
@@ -164,9 +163,7 @@ class BM25Retriever:
 
             scores = self._bm25.get_scores(tokenized_query)
 
-            scored_indices = sorted(
-                enumerate(scores), key=lambda x: x[1], reverse=True
-            )[:top_k]
+            scored_indices = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)[:top_k]
 
             results = []
             for idx, score in scored_indices:

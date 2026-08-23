@@ -10,9 +10,8 @@
 
 import re
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List
 
 from langchain_core.documents import Document
 from loguru import logger
@@ -23,6 +22,7 @@ from app.config import config
 @dataclass
 class Section:
     """一个结构化的文档章节（Parent 单元）"""
+
     title: str = ""
     level: int = 0  # 标题层级 1/2/3
     content: str = ""  # 完整的章节文本（含标题）
@@ -50,14 +50,14 @@ class DocumentSplitterService:
 
     # ── 公开接口 ──────────────────────────────────────────────
 
-    def split_document(self, content: str, file_path: str = "") -> List[Document]:
+    def split_document(self, content: str, file_path: str = "") -> list[Document]:
         """智能分割文档（根据文件类型选择分割器）"""
         if file_path.endswith(".md"):
             return self.split_markdown(content, file_path)
         else:
             return self.split_text(content, file_path)
 
-    def split_markdown(self, content: str, file_path: str = "") -> List[Document]:
+    def split_markdown(self, content: str, file_path: str = "") -> list[Document]:
         """结构感知 Markdown 分割 → Parent-Child 双层分块
 
         Returns:
@@ -74,12 +74,10 @@ class DocumentSplitterService:
             logger.info(f"结构解析: {file_path} → {len(sections)} 个 Parent 章节")
 
             # Step 2: 每个 Parent 切分为 Child chunks
-            all_children: List[Document] = []
+            all_children: list[Document] = []
             for section in sections:
                 parent_id = str(uuid.uuid4())
-                children = self._split_section_to_children(
-                    section, parent_id, file_path
-                )
+                children = self._split_section_to_children(section, parent_id, file_path)
                 all_children.extend(children)
 
             logger.info(
@@ -92,7 +90,7 @@ class DocumentSplitterService:
             logger.error(f"Markdown 分割失败: {file_path}, 错误: {e}")
             raise
 
-    def split_text(self, content: str, file_path: str = "") -> List[Document]:
+    def split_text(self, content: str, file_path: str = "") -> list[Document]:
         """分割纯文本文档（无结构感知，按段落切分）"""
         if not content or not content.strip():
             logger.warning(f"文本文档内容为空: {file_path}")
@@ -128,7 +126,7 @@ class DocumentSplitterService:
 
     # ── Markdown 结构解析 ─────────────────────────────────────
 
-    def _parse_sections(self, content: str) -> List[Section]:
+    def _parse_sections(self, content: str) -> list[Section]:
         """将 Markdown 按标题层级解析为 Section 列表
 
         策略：
@@ -138,6 +136,7 @@ class DocumentSplitterService:
         """
         # 保护代码块：用占位符替换，防止代码块中的 # 被误识别为标题
         code_blocks: list[str] = []
+
         def _replace_code(match: re.Match) -> str:
             code_blocks.append(match.group(0))
             return f"__CODE_BLOCK_{len(code_blocks) - 1}__"
@@ -152,13 +151,13 @@ class DocumentSplitterService:
             restored = self._restore_code_blocks(protected, code_blocks)
             return [Section(content=restored.strip())]
 
-        sections: List[Section] = []
+        sections: list[Section] = []
         current_h1 = ""
         current_h2 = ""
 
         # 处理第一个标题之前的内容
         if headings[0].start() > 0:
-            pre_text = protected[:headings[0].start()].strip()
+            pre_text = protected[: headings[0].start()].strip()
             if pre_text:
                 restored = self._restore_code_blocks(pre_text, code_blocks)
                 sections.append(Section(content=restored))
@@ -204,20 +203,14 @@ class DocumentSplitterService:
             text = text.replace(f"__CODE_BLOCK_{i}__", block)
         return text
 
-    def _merge_small_sections(
-        self, sections: List[Section], min_size: int = 200
-    ) -> List[Section]:
+    def _merge_small_sections(self, sections: list[Section], min_size: int = 200) -> list[Section]:
         """合并过小的 section 到相邻 section"""
         if len(sections) <= 1:
             return sections
 
-        merged: List[Section] = []
+        merged: list[Section] = []
         for section in sections:
-            if (
-                merged
-                and len(section.content) < min_size
-                and section.level >= merged[-1].level
-            ):
+            if merged and len(section.content) < min_size and section.level >= merged[-1].level:
                 # 合并到前一个 section
                 merged[-1].content += "\n\n" + section.content
             else:
@@ -229,7 +222,7 @@ class DocumentSplitterService:
 
     def _split_section_to_children(
         self, section: Section, parent_id: str, file_path: str
-    ) -> List[Document]:
+    ) -> list[Document]:
         """将一个 Parent section 切分为 Child chunks
 
         规则：
@@ -270,19 +263,19 @@ class DocumentSplitterService:
 
         return docs
 
-    def _split_to_atoms(self, text: str) -> List[str]:
+    def _split_to_atoms(self, text: str) -> list[str]:
         """将文本切分为不可再分的原子块
 
         原子块 = 代码块（整块） | 段落（双换行分隔）
         """
-        atoms: List[str] = []
+        atoms: list[str] = []
 
         # 先提取代码块，其余按段落切分
         parts = self._CODE_BLOCK_RE.split(text)
         code_matches = self._CODE_BLOCK_RE.findall(text)
         code_idx = 0
 
-        for i, part in enumerate(parts):
+        for _i, part in enumerate(parts):
             # 非代码部分：按双换行切分为段落
             paragraphs = re.split(r"\n\n+", part.strip())
             for para in paragraphs:
@@ -297,7 +290,7 @@ class DocumentSplitterService:
 
         return atoms
 
-    def _assemble_children(self, atoms: List[str]) -> List[str]:
+    def _assemble_children(self, atoms: list[str]) -> list[str]:
         """将原子块组装为目标大小的 child chunks
 
         贪心组装：持续合并原子块，直到超过 child_chunk_size
@@ -305,8 +298,8 @@ class DocumentSplitterService:
         if not atoms:
             return []
 
-        chunks: List[str] = []
-        current_parts: List[str] = []
+        chunks: list[str] = []
+        current_parts: list[str] = []
         current_len = 0
 
         for atom in atoms:
@@ -362,11 +355,11 @@ class DocumentSplitterService:
 
     # ── 通用文本切分 ─────────────────────────────────────────
 
-    def _chunk_text(self, text: str, chunk_size: int, overlap: int) -> List[str]:
+    def _chunk_text(self, text: str, chunk_size: int, overlap: int) -> list[str]:
         """按段落边界切分文本"""
         paragraphs = re.split(r"\n\n+", text)
-        chunks: List[str] = []
-        current: List[str] = []
+        chunks: list[str] = []
+        current: list[str] = []
         current_len = 0
 
         for para in paragraphs:

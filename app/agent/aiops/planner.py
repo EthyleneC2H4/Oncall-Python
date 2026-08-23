@@ -5,25 +5,35 @@ Planner 节点：制定执行计划
 
 import time
 from textwrap import dedent
-from typing import Dict, Any, List
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_qwq import ChatQwen
-from pydantic import BaseModel, Field
-from loguru import logger
+from typing import Any
 
-from app.config import config
-from app.tools import get_current_time, retrieve_knowledge, retrieve_with_hyde, retrieve_with_rewrite_and_rerank, query_alert_graph, predict_alert_cascade
+from langchain_core.prompts import ChatPromptTemplate
+from loguru import logger
+from pydantic import BaseModel, Field
+
 from app.agent.mcp_client import get_mcp_client_with_retry
+from app.config import config
+from app.core.llm_factory import LLMFactory
+from app.services.context_assembler import context_assembler
 from app.services.knowledge_graph_service import knowledge_graph_service
 from app.services.query_router import query_router
-from app.services.context_assembler import context_assembler
+from app.tools import (
+    get_current_time,
+    predict_alert_cascade,
+    query_alert_graph,
+    retrieve_knowledge,
+    retrieve_with_hyde,
+    retrieve_with_rewrite_and_rerank,
+)
+
 from .state import PlanExecuteState
 from .utils import format_tools_description
 
 
 class Plan(BaseModel):
     """计划的输出格式"""
-    steps: List[str] = Field(
+
+    steps: list[str] = Field(
         description="完成任务所需的不同步骤。这些步骤应该按顺序执行，每一步都建立在前一步的基础上。"
     )
 
@@ -32,6 +42,7 @@ def _get_planner_prompt_text() -> str:
     """获取 Planner Prompt，优先从版本化管理器加载"""
     try:
         from app.core.prompt_manager import prompt_manager
+
         template = prompt_manager.get("planner")
         if template:
             logger.debug(f"加载 Planner Prompt 模板: v{template.version}")
@@ -75,7 +86,7 @@ planner_prompt = ChatPromptTemplate.from_messages(
 )
 
 
-async def planner(state: PlanExecuteState) -> Dict[str, Any]:
+async def planner(state: PlanExecuteState) -> dict[str, Any]:
     """
     规划节点：根据用户输入生成执行计划
 
@@ -102,11 +113,15 @@ async def planner(state: PlanExecuteState) -> Dict[str, Any]:
                 if strategy["use_hyde"]:
                     # 全链路增强检索：Rewrite + HyDE + BM25 + Rerank
                     logger.info("使用全链路增强检索 (Rewrite+HyDE+BM25+Rerank)")
-                    context_str, _ = await retrieve_with_hyde(input_text, top_k=strategy["rag_top_k"])
+                    context_str, _ = await retrieve_with_hyde(
+                        input_text, top_k=strategy["rag_top_k"]
+                    )
                 else:
                     # 快速增强检索：Rewrite + BM25 + Rerank（无 HyDE，适合诊断类）
                     logger.info("使用快速增强检索 (Rewrite+BM25+Rerank)")
-                    context_str, _ = await retrieve_with_rewrite_and_rerank(input_text, top_k=strategy["rag_top_k"])
+                    context_str, _ = await retrieve_with_rewrite_and_rerank(
+                        input_text, top_k=strategy["rag_top_k"]
+                    )
                 if context_str and context_str.strip():
                     experience_docs = context_str
                     logger.info(f"找到相关经验文档，长度: {len(experience_docs)}")
@@ -120,7 +135,18 @@ async def planner(state: PlanExecuteState) -> Dict[str, Any]:
         if strategy["use_kg"]:
             try:
                 # 优先使用路由提取的关键词，再尝试默认关键词列表
-                all_keywords = keywords + ["CPU", "内存", "memory", "磁盘", "disk", "响应", "slow", "不可用", "unavailable", "OOM"]
+                all_keywords = keywords + [
+                    "CPU",
+                    "内存",
+                    "memory",
+                    "磁盘",
+                    "disk",
+                    "响应",
+                    "slow",
+                    "不可用",
+                    "unavailable",
+                    "OOM",
+                ]
                 for keyword in all_keywords:
                     if keyword.lower() in input_text.lower():
                         kg_analysis = knowledge_graph_service.format_analysis_context(keyword)
@@ -158,27 +184,29 @@ async def planner(state: PlanExecuteState) -> Dict[str, Any]:
         )
 
         # 步骤4: 创建 LLM 并生成计划
-        llm = ChatQwen(
+        llm = LLMFactory.create_chat_model(
             model=config.rag_model,
-            api_key=config.dashscope_api_key,
-            temperature=0
+            temperature=0,
+            streaming=False,
         )
 
         planner_chain = planner_prompt | llm.with_structured_output(Plan)
 
         # 调用 LLM 生成计划
-        plan_result = await planner_chain.ainvoke({
-            "messages": [("user", input_text)],
-            "tools_description": tools_description,
-            "experience_context": experience_context
-        })
+        plan_result = await planner_chain.ainvoke(
+            {
+                "messages": [("user", input_text)],
+                "tools_description": tools_description,
+                "experience_context": experience_context,
+            }
+        )
 
         # 提取步骤列表
         if isinstance(plan_result, Plan):
             plan_steps = plan_result.steps
         else:
             # 如果返回的是字典，提取 steps 字段
-            plan_steps = plan_result.get("steps", [])  # type: ignore
+            plan_steps = plan_result.get("steps", [])
 
         logger.info(f"计划已生成，共 {len(plan_steps)} 个步骤")
         for i, step in enumerate(plan_steps, 1):
@@ -186,32 +214,38 @@ async def planner(state: PlanExecuteState) -> Dict[str, Any]:
 
         # 构建诊断事件
         events = []
-        events.append({
-            "timestamp": time.time(),
-            "event_type": "routing",
-            "agent": "planner",
-            "action": f"查询意图分类: {intent}",
-            "result_summary": f"关键词: {', '.join(keywords)}",
-            "duration_ms": 0,
-        })
+        events.append(
+            {
+                "timestamp": time.time(),
+                "event_type": "routing",
+                "agent": "planner",
+                "action": f"查询意图分类: {intent}",
+                "result_summary": f"关键词: {', '.join(keywords)}",
+                "duration_ms": 0,
+            }
+        )
         if kg_context:
-            events.append({
-                "timestamp": time.time(),
-                "event_type": "kg_query",
-                "agent": "planner",
-                "action": "知识图谱查询",
-                "result_summary": kg_context[:200],
-                "duration_ms": 0,
-            })
+            events.append(
+                {
+                    "timestamp": time.time(),
+                    "event_type": "kg_query",
+                    "agent": "planner",
+                    "action": "知识图谱查询",
+                    "result_summary": kg_context[:200],
+                    "duration_ms": 0,
+                }
+            )
         if experience_docs:
-            events.append({
-                "timestamp": time.time(),
-                "event_type": "rag_retrieve",
-                "agent": "planner",
-                "action": f"文档检索 (HyDE={strategy['use_hyde']})",
-                "result_summary": f"检索到 {len(experience_docs)} 字符的相关文档",
-                "duration_ms": 0,
-            })
+            events.append(
+                {
+                    "timestamp": time.time(),
+                    "event_type": "rag_retrieve",
+                    "agent": "planner",
+                    "action": f"文档检索 (HyDE={strategy['use_hyde']})",
+                    "result_summary": f"检索到 {len(experience_docs)} 字符的相关文档",
+                    "duration_ms": 0,
+                }
+            )
 
         return {
             "plan": plan_steps,
@@ -224,17 +258,15 @@ async def planner(state: PlanExecuteState) -> Dict[str, Any]:
         logger.error(f"生成计划失败: {e}", exc_info=True)
         # 返回一个默认计划
         return {
-            "plan": [
-                "收集相关信息",
-                "分析数据",
-                "生成报告"
+            "plan": ["收集相关信息", "分析数据", "生成报告"],
+            "diagnosis_events": [
+                {
+                    "timestamp": time.time(),
+                    "event_type": "reasoning",
+                    "agent": "planner",
+                    "action": "生成计划失败，使用默认计划",
+                    "result_summary": str(e),
+                    "duration_ms": 0,
+                }
             ],
-            "diagnosis_events": [{
-                "timestamp": time.time(),
-                "event_type": "reasoning",
-                "agent": "planner",
-                "action": "生成计划失败，使用默认计划",
-                "result_summary": str(e),
-                "duration_ms": 0,
-            }],
         }

@@ -21,6 +21,7 @@ NC = \033[0m
         install install-dev dev run test test-quick format lint fix type-check \
         security pre-commit-install pre-commit check-all coverage docs shell \
         ipython watch add add-dev remove list-docs test-upload sync logs \
+        reindex reindex-drop \
         start-cls stop-cls start-monitor stop-monitor start-api stop-api status-mcp
 
 # ============================================================
@@ -62,6 +63,8 @@ help:
 	@echo "  $(YELLOW)make upload$(NC)       - 📤 上传 docs 目录下的文档"
 	@echo "  $(YELLOW)make list-docs$(NC)    - 📚 列出可上传的文档"
 	@echo "  $(YELLOW)make test-upload$(NC)  - 🧪 测试上传单个文件"
+	@echo "  $(YELLOW)make reindex$(NC)      - ♻️  重灌向量索引（本地 BGE）"
+	@echo "  $(YELLOW)make reindex-drop$(NC) - ⚠️  drop 集合后彻底重建索引（换 embedding 模型时用）"
 	@echo ""
 	@echo "$(CYAN)【依赖管理】$(NC)"
 	@echo "  $(YELLOW)make install$(NC)      - 📦 安装生产依赖"
@@ -494,6 +497,17 @@ test-upload:
 	else \
 		echo "$(RED)测试文件不存在$(NC)"; \
 	fi
+
+# 重灌向量索引（保留集合，不清空旧数据）
+reindex:
+	@echo "$(YELLOW)♻️  重灌向量索引 (docs: $(DOCS_DIR))...$(NC)"
+	.venv/bin/python scripts/reindex_vector_store.py --docs $(DOCS_DIR)
+
+# drop 集合后彻底重建（更换 embedding 模型后必须执行）
+reindex-drop:
+	@echo "$(RED)⚠️  将删除 Milvus 集合 'biz' 并按当前 embedding 模型重建$(NC)"
+	@echo "$(YELLOW)♻️  重建向量索引 (docs: $(DOCS_DIR))...$(NC)"
+	.venv/bin/python scripts/reindex_vector_store.py --docs $(DOCS_DIR) --drop
 
 # ============================================================
 # 依赖管理

@@ -4,7 +4,6 @@
 支持按 session / 场景 / 模型 聚合。
 """
 
-import time
 from collections import defaultdict
 from typing import Any
 
@@ -12,15 +11,23 @@ from loguru import logger
 
 from app.core.audit import audit_logger
 
-
-# DashScope 定价（每千 Token，单位: 元）
-MODEL_PRICING = {
-    "qwen-max": {"input": 0.02, "output": 0.06},
-    "qwen-plus": {"input": 0.004, "output": 0.012},
-    "qwen-turbo": {"input": 0.002, "output": 0.006},
-    "text-embedding-v4": {"input": 0.0007, "output": 0},
-    "gte-rerank": {"input": 0.001, "output": 0},
+# OpenRouter 定价（每千 Token，单位: 美元）
+# 数据来源: GET https://openrouter.ai/api/v1/models （2026-08 查询）
+MODEL_PRICING: dict[str, dict[str, float]] = {
+    # 主力模型：NVIDIA Nemotron 3.5 Lightning ($0.08/$0.20 每 1M token)
+    "nvidia/nemotron-3.5-lightning": {"input": 0.00008, "output": 0.0002},
+    # 弱模型层（路由/改写等轻任务）
+    "nvidia/nemotron-3-nano-30b-a3b": {"input": 0.00005, "output": 0.0002},
+    # 免费档变体
+    "nvidia/nemotron-3.5-lightning:free": {"input": 0, "output": 0},
+    "nvidia/nemotron-3-nano-30b-a3b:free": {"input": 0, "output": 0},
+    # 本地推理组件：不产生 API 费用
+    "local/bge-large-zh-v1.5": {"input": 0, "output": 0},
+    "local/bge-reranker-base": {"input": 0, "output": 0},
 }
+
+# 未登记模型的兜底定价（按主力模型计，宁可高估不高估）
+DEFAULT_PRICING: dict[str, float] = MODEL_PRICING["nvidia/nemotron-3.5-lightning"]
 
 
 class CostTracker:
@@ -57,7 +64,7 @@ class CostTracker:
         Returns:
             {"input_cost": float, "output_cost": float, "total_cost": float}
         """
-        pricing = MODEL_PRICING.get(model, {"input": 0.02, "output": 0.06})
+        pricing = MODEL_PRICING.get(model, DEFAULT_PRICING)
 
         input_cost = (input_tokens / 1000) * pricing["input"]
         output_cost = (output_tokens / 1000) * pricing["output"]
@@ -88,7 +95,7 @@ class CostTracker:
 
         logger.debug(
             f"[Cost] model={model} tokens={input_tokens}+{output_tokens} "
-            f"cost={total_cost:.4f}元 scene={scene}"
+            f"cost=${total_cost:.6f} scene={scene}"
         )
 
         return {
@@ -111,10 +118,7 @@ class CostTracker:
                 }
                 for model, stats in self._by_model.items()
             },
-            "by_scene": {
-                scene: round(cost, 4)
-                for scene, cost in self._by_scene.items()
-            },
+            "by_scene": {scene: round(cost, 4) for scene, cost in self._by_scene.items()},
         }
 
     def reset(self):

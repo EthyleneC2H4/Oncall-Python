@@ -5,12 +5,12 @@
 """
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_qwq import ChatQwen
 from loguru import logger
 
-from app.config import config
 from app.agent.mcp_client import get_mcp_client_with_retry
-from app.tools import retrieve_knowledge, query_alert_graph, predict_alert_cascade
+from app.config import config
+from app.core.llm_factory import LLMFactory
+from app.tools import predict_alert_cascade, query_alert_graph, retrieve_knowledge
 
 
 class BaseSpecialistAgent:
@@ -21,9 +21,9 @@ class BaseSpecialistAgent:
     confidence: float = 0.5
 
     def __init__(self):
-        self.llm = ChatQwen(
+        self.llm = LLMFactory.create_chat_model(
+            streaming=False,
             model=config.rag_model,
-            api_key=config.dashscope_api_key,
             temperature=0,
         )
 
@@ -70,25 +70,28 @@ class LogAnalystAgent(BaseSpecialistAgent):
                 # 如果有工具调用，执行后汇总
                 if hasattr(response, "tool_calls") and response.tool_calls:
                     from langgraph.prebuilt import ToolNode
+
                     tool_node = ToolNode(log_tools)
                     messages.append(response)
                     tool_results = await tool_node.ainvoke({"messages": messages})
                     messages.extend(tool_results["messages"])
                     final = await self.llm.ainvoke(messages)
                     self.confidence = 0.7
-                    return final.content
+                    return str(final.content)
                 else:
                     self.confidence = 0.5
-                    return response.content
+                    return str(response.content)
             else:
                 # 无日志工具时，基于 LLM 知识分析
                 messages = [
                     SystemMessage(content=self.system_prompt),
-                    HumanMessage(content=f"（无日志查询工具可用）请基于经验分析以下告警可能的日志表现：{alert_input}"),
+                    HumanMessage(
+                        content=f"（无日志查询工具可用）请基于经验分析以下告警可能的日志表现：{alert_input}"
+                    ),
                 ]
                 response = await self.llm.ainvoke(messages)
                 self.confidence = 0.3
-                return response.content
+                return str(response.content)
 
         except Exception as e:
             logger.error(f"LogAnalystAgent 分析失败: {e}")
@@ -119,7 +122,9 @@ class MetricInspectorAgent(BaseSpecialistAgent):
             mcp_tools = await mcp_client.get_tools()
 
             # 找到指标相关工具
-            metric_tools = [t for t in mcp_tools if "metric" in t.name.lower() or "monitor" in t.name.lower()]
+            metric_tools = [
+                t for t in mcp_tools if "metric" in t.name.lower() or "monitor" in t.name.lower()
+            ]
 
             if metric_tools:
                 llm_with_tools = self.llm.bind_tools(metric_tools)
@@ -131,24 +136,27 @@ class MetricInspectorAgent(BaseSpecialistAgent):
 
                 if hasattr(response, "tool_calls") and response.tool_calls:
                     from langgraph.prebuilt import ToolNode
+
                     tool_node = ToolNode(metric_tools)
                     messages.append(response)
                     tool_results = await tool_node.ainvoke({"messages": messages})
                     messages.extend(tool_results["messages"])
                     final = await self.llm.ainvoke(messages)
                     self.confidence = 0.7
-                    return final.content
+                    return str(final.content)
                 else:
                     self.confidence = 0.5
-                    return response.content
+                    return str(response.content)
             else:
                 messages = [
                     SystemMessage(content=self.system_prompt),
-                    HumanMessage(content=f"（无指标查询工具可用）请基于经验分析以下告警可能的指标表现：{alert_input}"),
+                    HumanMessage(
+                        content=f"（无指标查询工具可用）请基于经验分析以下告警可能的指标表现：{alert_input}"
+                    ),
                 ]
                 response = await self.llm.ainvoke(messages)
                 self.confidence = 0.3
-                return response.content
+                return str(response.content)
 
         except Exception as e:
             logger.error(f"MetricInspectorAgent 分析失败: {e}")
@@ -187,6 +195,7 @@ class KnowledgeRetrieverAgent(BaseSpecialistAgent):
 
             if hasattr(response, "tool_calls") and response.tool_calls:
                 from langgraph.prebuilt import ToolNode
+
                 tool_node = ToolNode(local_tools)
                 messages.append(response)
                 tool_results = await tool_node.ainvoke({"messages": messages})
@@ -201,10 +210,10 @@ class KnowledgeRetrieverAgent(BaseSpecialistAgent):
                     final = await self.llm.ainvoke(messages)
 
                 self.confidence = 0.8
-                return final.content
+                return str(final.content)
             else:
                 self.confidence = 0.4
-                return response.content
+                return str(response.content)
 
         except Exception as e:
             logger.error(f"KnowledgeRetrieverAgent 分析失败: {e}")

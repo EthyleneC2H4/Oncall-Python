@@ -28,14 +28,17 @@
     python -m app.eval.prompt_regression --baseline prompts/ --candidate prompts/ --output /tmp/test_diff.json --max-cases 2
 """
 
-import json
-import time
 import argparse
 import asyncio
+import json
+import time
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
+
+from app.config import config
+from app.core.llm_factory import LLMFactory
 
 
 class PromptRegressionRunner:
@@ -106,7 +109,7 @@ class PromptRegressionRunner:
         for filename in ["diagnostic_cases.json", "negative_cases.json"]:
             filepath = dataset_dir / filename
             if filepath.exists():
-                with open(filepath, "r", encoding="utf-8") as f:
+                with open(filepath, encoding="utf-8") as f:
                     cases.extend(json.load(f))
         return cases
 
@@ -116,13 +119,9 @@ class PromptRegressionRunner:
         reference = test_case.get("reference", "")
 
         # 使用 baseline prompt 生成
-        baseline_answer = await self._generate_with_prompt(
-            query, str(self.baseline_dir)
-        )
+        baseline_answer = await self._generate_with_prompt(query, str(self.baseline_dir))
         # 使用 candidate prompt 生成
-        candidate_answer = await self._generate_with_prompt(
-            query, str(self.candidate_dir)
-        )
+        candidate_answer = await self._generate_with_prompt(query, str(self.candidate_dir))
 
         # LLM Judge 评测
         from app.eval.llm_judge import llm_judge
@@ -156,35 +155,33 @@ class PromptRegressionRunner:
 
     async def _generate_with_prompt(self, query: str, prompt_dir: str) -> str:
         """使用指定 Prompt 目录生成回答"""
-        from langchain_qwq import ChatQwen
-        from app.config import config
-
         # 尝试加载指定目录的 system_prompt
         system_prompt = ""
         prompt_path = Path(prompt_dir) / "system_prompt_v1.yaml"
         if prompt_path.exists():
             try:
                 import yaml
-                with open(prompt_path, "r", encoding="utf-8") as f:
+
+                with open(prompt_path, encoding="utf-8") as f:
                     data = yaml.safe_load(f)
                 system_prompt = data.get("content", "")
             except Exception:
                 pass
 
         prompt = (
-            f"{system_prompt}\n\n"
-            f"## 用户问题\n{query}\n\n"
-            "## 回答\n"
-        ) if system_prompt else query
+            (f"{system_prompt}\n\n" f"## 用户问题\n{query}\n\n" "## 回答\n")
+            if system_prompt
+            else query
+        )
 
         try:
-            llm = ChatQwen(
+            llm = LLMFactory.create_chat_model(
+                streaming=False,
                 model=config.rag_model,
-                api_key=config.dashscope_api_key,
                 temperature=0,
             )
             result = await llm.ainvoke(prompt)
-            return result.content
+            return str(result.content)
         except Exception as e:
             logger.error(f"生成回答失败: {e}")
             return f"生成失败: {e}"
@@ -197,7 +194,8 @@ class PromptRegressionRunner:
 
         degraded_count = sum(1 for r in results if r.get("degraded", False))
         improved_count = sum(
-            1 for r in results
+            1
+            for r in results
             if r.get("faithfulness_diff", 0) > 1 or r.get("relevancy_diff", 0) > 1
         )
 
@@ -214,9 +212,7 @@ class PromptRegressionRunner:
             "verdict": (
                 "PASS"
                 if degraded_count == 0 and avg_faith_diff >= 0
-                else "WARN"
-                if degraded_count <= 2
-                else "FAIL"
+                else "WARN" if degraded_count <= 2 else "FAIL"
             ),
         }
 
@@ -243,28 +239,14 @@ class PromptRegressionRunner:
 
 # ──────────────── CLI ────────────────
 
+
 async def main():
     parser = argparse.ArgumentParser(description="OnCall Prompt 版本回归评测")
-    parser.add_argument(
-        "--baseline", required=True,
-        help="Baseline Prompt 目录 (当前版本)"
-    )
-    parser.add_argument(
-        "--candidate", required=True,
-        help="Candidate Prompt 目录 (新版本)"
-    )
-    parser.add_argument(
-        "--output", default="eval/results/prompt_diff.json",
-        help="输出报告路径"
-    )
-    parser.add_argument(
-        "--prompt-name", default=None,
-        help="仅对比指定 Prompt (如 system_prompt)"
-    )
-    parser.add_argument(
-        "--max-cases", type=int, default=20,
-        help="最大对比用例数 (默认 20)"
-    )
+    parser.add_argument("--baseline", required=True, help="Baseline Prompt 目录 (当前版本)")
+    parser.add_argument("--candidate", required=True, help="Candidate Prompt 目录 (新版本)")
+    parser.add_argument("--output", default="eval/results/prompt_diff.json", help="输出报告路径")
+    parser.add_argument("--prompt-name", default=None, help="仅对比指定 Prompt (如 system_prompt)")
+    parser.add_argument("--max-cases", type=int, default=20, help="最大对比用例数 (默认 20)")
 
     args = parser.parse_args()
     runner = PromptRegressionRunner(

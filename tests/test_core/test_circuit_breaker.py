@@ -4,12 +4,13 @@
 """
 
 import time
+
 import pytest
 
 from app.core.circuit_breaker import (
     CircuitBreaker,
-    CircuitState,
     CircuitOpenError,
+    CircuitState,
     get_breaker,
 )
 
@@ -77,7 +78,7 @@ class TestCircuitBreakerRejection:
         cb = CircuitBreaker("test", failure_threshold=1, cooldown_seconds=60)
         cb.before_call()
         cb.record_failure()
-        with pytest.raises(CircuitOpenError, match="熔断器.*已打开"):
+        with pytest.raises(CircuitOpenError, match="Circuit breaker for 'test' is OPEN"):
             cb.before_call()
 
     def test_before_call_allows_when_half_open(self):
@@ -111,7 +112,8 @@ class TestCircuitBreakerRegistry:
         assert b1 is not b2
 
     def test_pre_registered_breakers(self):
-        for name in ["dashscope_llm", "dashscope_embedding", "milvus"]:
+        # 与 circuit_breaker.py 底部预注册清单保持一致
+        for name in ["llm", "embedding", "rerank", "milvus", "mcp_cls", "mcp_monitor"]:
             cb = get_breaker(name)
             assert cb.name == name
             assert cb.state == CircuitState.CLOSED

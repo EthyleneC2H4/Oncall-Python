@@ -4,10 +4,7 @@
 """
 
 import json
-import tempfile
 from pathlib import Path
-
-import pytest
 
 
 class TestDatasetLoading:
@@ -134,7 +131,7 @@ class TestLLMJudge:
 
         judge = LLMJudge()
         result = judge._parse_judge_result(
-            "根据分析，评为高分。\n```json\n{\"score\": 4, \"reason\": \"基本准确\"}\n```"
+            '根据分析，评为高分。\n```json\n{"score": 4, "reason": "基本准确"}\n```'
         )
         assert result["score"] == 4
 
@@ -172,6 +169,7 @@ class TestEvaluationResultPersistence:
 
         # 使用 monkeypatch 或直接指定输出目录
         import app.eval.ragas_evaluator as re
+
         original = re.Path
         re.Path = lambda x: tmp_path / x
         try:

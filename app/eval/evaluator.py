@@ -83,7 +83,7 @@ class AIOpsEvaluator:
         for filepath in [diagnostic_file, negative_file]:
             if filepath.exists():
                 try:
-                    with open(filepath, "r", encoding="utf-8") as f:
+                    with open(filepath, encoding="utf-8") as f:
                         data = json.load(f)
                     # 兼容旧格式：补充 relevant_docs 字段
                     for case in data:
@@ -103,24 +103,24 @@ class AIOpsEvaluator:
 
     async def evaluate_all(self) -> dict[str, Any]:
         """运行所有测试用例，返回评测结果"""
-        results = {
+        results: dict[str, Any] = {
             "total_cases": len(self.test_cases),
             "case_results": [],
             "summary": {},
         }
 
+        case_results: list[Any] = results["case_results"]
         for tc in self.test_cases:
-            case_result = await self._evaluate_case(tc)
-            results["case_results"].append(case_result)
+            case_results.append(await self._evaluate_case(tc))
 
         # 汇总
-        results["summary"] = self._summarize(results["case_results"])
+        results["summary"] = self._summarize(case_results)
         return results
 
     async def _evaluate_case(self, test_case: dict) -> dict:
         """评测单个测试用例"""
         from app.services.query_router import query_router
-        from app.tools import retrieve_knowledge, query_alert_graph
+        from app.tools import query_alert_graph, retrieve_knowledge
 
         tc_id = test_case["id"]
         query = test_case["query"]
@@ -194,9 +194,13 @@ class AIOpsEvaluator:
             return {}
 
         routing_correct = sum(1 for r in case_results if r.get("routing", {}).get("correct", False))
-        retrieval_relevant = sum(1 for r in case_results if r.get("retrieval", {}).get("relevant_found", False))
+        retrieval_relevant = sum(
+            1 for r in case_results if r.get("retrieval", {}).get("relevant_found", False)
+        )
         kg_found = sum(1 for r in case_results if r.get("kg_analysis", {}).get("found", False))
-        kg_root_hit = sum(1 for r in case_results if r.get("kg_analysis", {}).get("root_cause_hit", False))
+        kg_root_hit = sum(
+            1 for r in case_results if r.get("kg_analysis", {}).get("root_cause_hit", False)
+        )
 
         return {
             "routing_accuracy": routing_correct / total,

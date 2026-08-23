@@ -12,23 +12,20 @@ import uuid
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from loguru import logger
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 from app.core.cache import TTLCache
 from app.middleware.input_guard import input_guard
 
-
 # 幂等缓存：request_id → response，60s TTL
-_idempotency_cache = TTLCache(maxsize=1000, ttl_seconds=60)
+_idempotency_cache = TTLCache(name="idempotency", maxsize=1000, ttl_seconds=60)
 
 
 class RequestGuardMiddleware(BaseHTTPMiddleware):
     """请求守卫中间件"""
 
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         # 只处理 API 请求
         path = request.url.path
         if not path.startswith("/api/"):
@@ -44,7 +41,7 @@ class RequestGuardMiddleware(BaseHTTPMiddleware):
         # 幂等控制：检查是否重复请求
         if request.method == "POST":
             cached = _idempotency_cache.get(request_id)
-            if cached is not None:
+            if isinstance(cached, Response):
                 logger.info(f"幂等命中: request_id={request_id}")
                 return cached
 

@@ -17,12 +17,7 @@ class ChatRequest(BaseModel):
 
     class Config:
         populate_by_name = True
-        json_schema_extra = {
-            "example": {
-                "Id": "session-123",
-                "Question": "什么是向量数据库？"
-            }
-        }
+        json_schema_extra = {"example": {"Id": "session-123", "Question": "什么是向量数据库？"}}
 
 
 class ClearRequest(BaseModel):
@@ -39,6 +34,7 @@ class AiRequest(BaseModel):
 
     统一所有入口的请求格式，为鉴权、限流、审计提供基础。
     """
+
     request_id: str = Field(default_factory=lambda: str(uuid4()))
     user_id: str = "anonymous"
     session_id: str = "default"

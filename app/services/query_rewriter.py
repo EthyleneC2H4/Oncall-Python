@@ -6,16 +6,17 @@
 - 补充同义词和关键术语
 """
 
-from langchain_qwq import ChatQwen
 from loguru import logger
 
 from app.config import config
+from app.core.llm_factory import LLMFactory
 
 
 def _get_rewrite_prompt() -> str:
     """获取查询改写 Prompt，优先从版本化管理器加载"""
     try:
         from app.core.prompt_manager import prompt_manager
+
         template = prompt_manager.get("rewrite")
         if template:
             return template.content
@@ -54,9 +55,9 @@ class QueryRewriter:
     @property
     def llm(self):
         if self._llm is None:
-            self._llm = ChatQwen(
+            self._llm = LLMFactory.create_chat_model(
+                streaming=False,
                 model=config.rag_model,
-                api_key=config.dashscope_api_key,
                 temperature=0,
             )
         return self._llm
@@ -75,10 +76,8 @@ class QueryRewriter:
             return query
 
         try:
-            result = await self.llm.ainvoke(
-                REWRITE_PROMPT.format(query=query)
-            )
-            rewritten = result.content.strip().strip('"').strip("'")
+            result = await self.llm.ainvoke(REWRITE_PROMPT.format(query=query))
+            rewritten = str(result.content).strip().strip('"').strip("'")
 
             if not rewritten or len(rewritten) < 2:
                 logger.warning("查询改写结果为空，使用原始查询")

@@ -14,7 +14,6 @@ dependencies = [
     "langchain-core>=0.1.0",
     "langchain-openai>=1.0.0",
     "langgraph>=0.0.40",
-    "dashscope>=1.14.0",
     "openai>=1.10.0",
     "pymilvus>=2.3.5",
     "pydantic>=2.5.0,<3.0.0",
@@ -29,7 +28,8 @@ dependencies = [
     "langchain-text-splitters>=1.1.0",
     "langchain-mcp-adapters>=0.2.1",
     "fastmcp>=2.14.0",
-    "langchain-qwq>=0.3.4",
+    "sentence-transformers>=2.7.0",
+    "FlagEmbedding>=1.2.0",
     "networkx>=3.2",
     "rank-bm25>=0.2.2",
     "jieba>=0.42.1",
@@ -156,7 +156,8 @@ exclude_lines = [
 ]
 
 [tool.mypy]
-python_version = "3.11"
+# 与运行时一致（numpy 2.x 的 .pyi 使用 PEP 695 type 语句，需 3.12 解析）
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
@@ -168,10 +169,6 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 warn_no_return = true
 strict_equality = true
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = ["dashscope.*", "langchain.*", "pymilvus.*"]
 ignore_missing_imports = true
 
 [tool.bandit]
