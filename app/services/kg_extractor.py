@@ -149,7 +149,7 @@ class KGExtractor:
         """
         all_triples = []
         for i, doc in enumerate(documents):
-            logger.info(f"处理文档 {i+1}/{len(documents)}")
+            logger.info(f"处理文档 {i + 1}/{len(documents)}")
             triples = await self.extract_from_text(doc)
             all_triples.extend(triples)
 

@@ -244,13 +244,9 @@ class CIEvalRunner:
             expected = list(case.get("expected_tool_calls") or [])
             session_filter = case.get("session_id")
             pool = [t for t in entries if not session_filter or t.session_id == session_filter]
-            scores.append(
-                evaluate_scenario(str(case.get("id", "")), expected, pool)
-            )
+            scores.append(evaluate_scenario(str(case.get("id", "")), expected, pool))
 
-        avg_match: float = (
-            round(sum(s.score for s in scores) / len(scores), 4) if scores else 0.0
-        )
+        avg_match: float = round(sum(s.score for s in scores) / len(scores), 4) if scores else 0.0
         fully_matched = sum(1 for s in scores if s.score == 1.0)
         summary: dict[str, Any] = {
             "scenarios": len(scores),
@@ -263,8 +259,11 @@ class CIEvalRunner:
             "timestamp": time.time(),
             "summary": summary,
             "scenario_details": [
-                {"id": s.scenario_id, "score": s.score,
-                 "failed": [d for d in s.details if not d["matched"]]}
+                {
+                    "id": s.scenario_id,
+                    "score": s.score,
+                    "failed": [d for d in s.details if not d["matched"]],
+                }
                 for s in scores
             ],
             "passed": avg_match >= BFCL_MIN_TOOL_MATCH,
@@ -408,13 +407,13 @@ class CIEvalRunner:
     def _print_gate_result(self, gate: dict):
         """打印门禁结果"""
         status = "PASSED" if gate["passed"] else "FAILED"
-        logger.info(f"\n{'='*40}")
+        logger.info(f"\n{'=' * 40}")
         logger.info(f"CI Gate: {status}")
-        logger.info(f"{'='*40}")
+        logger.info(f"{'=' * 40}")
         for check in gate.get("checks", []):
             icon = "[PASS]" if check["passed"] else "[FAIL]"
             logger.info(
-                f"  {icon} {check['metric']}: " f"{check['actual']:.2%} >= {check['threshold']:.2%}"
+                f"  {icon} {check['metric']}: {check['actual']:.2%} >= {check['threshold']:.2%}"
             )
         logger.info(f"\n{gate['summary']}")
 

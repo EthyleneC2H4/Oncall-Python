@@ -10,7 +10,6 @@
 支持混合四通道检索（P4）：[向量, HyDE, BM25, 知识图谱] → N 路 RRF 融合。
 """
 
-
 from langchain_core.documents import Document
 from langchain_core.tools import tool
 from loguru import logger
@@ -58,7 +57,8 @@ def retrieve_knowledge(query: str) -> tuple[str, list[Document]]:
 
         # 使用 similarity_search_with_score 获取分数，用于自我评估
         docs_with_scores = vector_store.similarity_search_with_score(
-            query, k=config.rag_top_k + 2  # 多检索几条，留出过滤空间
+            query,
+            k=config.rag_top_k + 2,  # 多检索几条，留出过滤空间
         )
 
         if not docs_with_scores:
@@ -136,9 +136,7 @@ async def retrieve_with_hyde(query: str, top_k: int | None = None) -> tuple[str,
         )
 
         # 路径B: 用假设性答案做向量检索
-        hyde_results = vector_store.similarity_search_with_score(
-            str(hypothesis_text), k=top_k + 3
-        )
+        hyde_results = vector_store.similarity_search_with_score(str(hypothesis_text), k=top_k + 3)
 
         # 路径C: BM25 关键词检索
         bm25_results = bm25_retriever.search(rewritten_query, top_k=top_k + 3)
@@ -306,9 +304,7 @@ async def retrieve_hybrid(query: str, top_k: int | None = None) -> tuple[str, li
         if not merged_docs:
             return "混合检索未找到相关文档。", []
 
-        reranked_docs = await reranker.rerank(
-            query=query, documents=merged_docs, top_n=top_k
-        )
+        reranked_docs = await reranker.rerank(query=query, documents=merged_docs, top_n=top_k)
         context = format_docs(reranked_docs)
         logger.info(f"混合检索完成: 融合 {len(merged_docs)} → 精排 {len(reranked_docs)}")
         return context, reranked_docs

@@ -5,7 +5,6 @@
 带缓存与健康探针；失败时抛异常，由调用方路由到 BM25-only 降级路径。
 """
 
-
 from typing import Any
 
 from langchain_core.embeddings import Embeddings

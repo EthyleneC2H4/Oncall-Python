@@ -278,9 +278,7 @@ def _salvage_truncated(text: str) -> Any | None:
     场景：max_tokens 截断输出 `"steps": [{"description": "查日志"}, {"desc` ——
     抢救出第一个完整元素而非整体失败。
     """
-    positions = [
-        i for i, ch in enumerate(text) if ch in "}]" and i < len(text) - 1
-    ]
+    positions = [i for i, ch in enumerate(text) if ch in "}]" and i < len(text) - 1]
     tries = 0
     for pos in reversed(positions):
         tries += 1

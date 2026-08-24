@@ -229,9 +229,7 @@ class ContextEngine:
         compressed_count = len(compressed_packets)
         survived_origins = {id(c.metadata.get("_origin")) for c in compressed_packets}
         dropped = sum(
-            1
-            for p in nonempty
-            if id(p) not in selected_ids and id(p) not in survived_origins
+            1 for p in nonempty if id(p) not in selected_ids and id(p) not in survived_origins
         )
 
         selected = [p for p in nonempty if id(p) in selected_ids] + compressed_packets
@@ -281,7 +279,9 @@ class ContextEngine:
 
     def _compressible(self, packets: list[Packet]) -> bool:
         """仅 RAG / HISTORY / MEMORY 视为可压缩（KG 结构信息截断易失真）"""
-        return any(p.kind in (PacketKind.RAG, PacketKind.HISTORY, PacketKind.MEMORY) for p in packets)
+        return any(
+            p.kind in (PacketKind.RAG, PacketKind.HISTORY, PacketKind.MEMORY) for p in packets
+        )
 
     async def _compress(self, packet: Packet) -> str:
         if self.compressor is not None:

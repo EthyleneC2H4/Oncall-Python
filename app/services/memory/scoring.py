@@ -89,9 +89,7 @@ def composite_score(
     importance = max(0.0, min(item.importance, 1.0))
 
     score = (
-        weights.relevance * relevance
-        + weights.importance * importance
-        + weights.recency * recency
+        weights.relevance * relevance + weights.importance * importance + weights.recency * recency
     )
     breakdown = {
         "relevance": round(relevance, 6),

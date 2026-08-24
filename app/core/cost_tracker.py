@@ -108,9 +108,7 @@ class CostTracker:
             "total_cost": round(total_cost, 6),
         }
 
-    def mark_prompt_variant(
-        self, variant: str, session_id: str = "", request_id: str = ""
-    ) -> None:
+    def mark_prompt_variant(self, variant: str, session_id: str = "", request_id: str = "") -> None:
         """记录一次 Prompt 变体运行（P5 AB 归因）
 
         不记 token/费用——那是 record 的职责；这里只做「哪个变体、跑了

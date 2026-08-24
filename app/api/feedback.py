@@ -49,9 +49,7 @@ def _clean_feedback_text(text: str, *, max_len: int = 500) -> str:
     return "".join(ch for ch in masked if ch.isprintable())[:max_len]
 
 
-def backfill_negative_case(
-    record: FeedbackRecord, datasets_dir: str = "eval/datasets"
-) -> dict:
+def backfill_negative_case(record: FeedbackRecord, datasets_dir: str = "eval/datasets") -> dict:
     """负反馈自动回填金标集（去重 + 版本递增）
 
     用户标记「诊断错误」且给出实际根因时，把该 case 追加进
@@ -139,9 +137,7 @@ async def submit_feedback(record: FeedbackRecord):
             backfill_info = {"backfilled": False, "reason": f"error: {e}", "version": None}
             logger.warning(f"负反馈回填金标集失败: {e}")
         if backfill_info["backfilled"]:
-            logger.info(
-                f"负反馈已回填金标集: version={backfill_info['version']}"
-            )
+            logger.info(f"负反馈已回填金标集: version={backfill_info['version']}")
 
     # 如果用户提供了实际根因，学习到知识图谱
     kg_updated = False

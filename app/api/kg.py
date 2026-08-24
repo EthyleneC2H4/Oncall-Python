@@ -1,6 +1,5 @@
 """知识图谱接口 - 提供告警关联分析、级联预测和图谱更新的 REST API"""
 
-
 from fastapi import APIRouter
 from loguru import logger
 from pydantic import BaseModel, Field

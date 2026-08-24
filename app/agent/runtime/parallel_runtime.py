@@ -79,11 +79,15 @@ class ParallelRuntime(AgentRuntime):
     name = "parallel"
 
     def __init__(self, agents: list | None = None, synthesizer: Synthesizer | None = None):
-        self.agents = agents if agents is not None else [
-            LogAnalystAgent(),
-            MetricInspectorAgent(),
-            KnowledgeRetrieverAgent(),
-        ]
+        self.agents = (
+            agents
+            if agents is not None
+            else [
+                LogAnalystAgent(),
+                MetricInspectorAgent(),
+                KnowledgeRetrieverAgent(),
+            ]
+        )
         self.synthesizer = synthesizer or Synthesizer()
         default_registry.register(self)
 
@@ -125,7 +129,9 @@ class ParallelRuntime(AgentRuntime):
                         stage="agent_result",
                         agent=item.agent_name,
                         finding=item.model_dump(),
-                        message=f"{item.agent_name} 分析完成" if succeeded else f"{item.agent_name} 执行失败",
+                        message=f"{item.agent_name} 分析完成"
+                        if succeeded
+                        else f"{item.agent_name} 执行失败",
                     )
 
             # 汇总交叉验证
@@ -164,7 +170,9 @@ class ParallelRuntime(AgentRuntime):
         return True
 
 
-async def run_parallel_diagnosis(alert_input: str, runtime: ParallelRuntime | None = None) -> DiagnosisResult:
+async def run_parallel_diagnosis(
+    alert_input: str, runtime: ParallelRuntime | None = None
+) -> DiagnosisResult:
     """运行多 Agent 并行诊断（兼容入口：消费事件流汇总为 DiagnosisResult）
 
     Args:

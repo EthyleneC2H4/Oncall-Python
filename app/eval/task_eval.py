@@ -75,7 +75,9 @@ def grade_answer(
     hit_forbidden = [e for e in forbidden if e and _contains(text, e)]
     if hit_forbidden:
         return TaskVerdict(
-            case_id="", grade=TaskGrade.WRONG, score=GRADE_SCORES[TaskGrade.WRONG],
+            case_id="",
+            grade=TaskGrade.WRONG,
+            score=GRADE_SCORES[TaskGrade.WRONG],
             hit_forbidden=hit_forbidden,
         )
 
@@ -95,8 +97,11 @@ def grade_answer(
         grade = TaskGrade.WRONG
 
     return TaskVerdict(
-        case_id="", grade=grade, score=GRADE_SCORES[grade],
-        hit_required=hit, missed_required=missed,
+        case_id="",
+        grade=grade,
+        score=GRADE_SCORES[grade],
+        hit_required=hit,
+        missed_required=missed,
     )
 
 
@@ -125,8 +130,6 @@ def summarize(verdicts: list[TaskVerdict]) -> dict:
 
     return {
         "total": len(verdicts),
-        "avg_score": (
-            round(weighted_sum / total_weight, 4) if total_weight > 0 else 0.0
-        ),
+        "avg_score": (round(weighted_sum / total_weight, 4) if total_weight > 0 else 0.0),
         "grades": distribution,
     }

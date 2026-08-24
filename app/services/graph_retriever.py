@@ -127,7 +127,8 @@ def serialize_subgraph(
         out_relations.setdefault(relation, []).append(text)
         if relation == "CAUSED_BY":
             resolved = [
-                _display(d) for _, d, e in graph.out_edges(dst, data=True)
+                _display(d)
+                for _, d, e in graph.out_edges(dst, data=True)
                 if e.get("relation") == "RESOLVED_BY"
             ]
             if resolved:

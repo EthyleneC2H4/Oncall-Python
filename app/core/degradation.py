@@ -101,9 +101,7 @@ def build_degradation_info(
     return DegradationInfo(
         is_degraded=True,
         level=severity_of(worst),
-        active_degradations=[
-            lvl.value for lvl in levels if lvl != DegradationLevel.NONE
-        ],
+        active_degradations=[lvl.value for lvl in levels if lvl != DegradationLevel.NONE],
         unavailable_services=unavailable or [],
         user_message=user_msg,
     )

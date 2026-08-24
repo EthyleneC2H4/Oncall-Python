@@ -168,9 +168,7 @@ async def chat_stream(
                     )
                     yield {
                         "event": "message",
-                        "data": json.dumps(
-                            {"type": "done", "data": done_data}, ensure_ascii=False
-                        ),
+                        "data": json.dumps({"type": "done", "data": done_data}, ensure_ascii=False),
                     }
                 elif chunk_type == "error":
                     # 发送错误信息

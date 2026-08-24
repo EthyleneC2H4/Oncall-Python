@@ -1,6 +1,5 @@
 """向量存储管理器 - 封装 Milvus VectorStore 操作"""
 
-
 from langchain_core.documents import Document
 from langchain_milvus import Milvus
 from loguru import logger
@@ -83,7 +82,7 @@ class VectorStoreManager:
             elapsed = time.time() - start_time
             logger.info(
                 f"批量添加 {len(documents)} 个文档到 VectorStore 完成, "
-                f"耗时: {elapsed:.2f}秒, 平均: {elapsed/len(documents):.2f}秒/个"
+                f"耗时: {elapsed:.2f}秒, 平均: {elapsed / len(documents):.2f}秒/个"
             )
 
             # 文档变更后使 BM25 索引失效，下次检索时自动重建

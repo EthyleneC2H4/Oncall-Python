@@ -206,15 +206,11 @@ class MemoryService:
                 return []
 
             top_k = k if k is not None else config.memory_recall_k
-            floor = (
-                min_importance if min_importance is not None else config.memory_min_importance
-            )
+            floor = min_importance if min_importance is not None else config.memory_min_importance
             current_time = now if now is not None else time.time()
 
             query_vec = await self._embed_safe(query)
-            candidates = await asyncio.to_thread(
-                store.candidates, user_id=user_id, types=types
-            )
+            candidates = await asyncio.to_thread(store.candidates, user_id=user_id, types=types)
 
             # 维度失配防护：换嵌入模型后存量向量与新查询全量不可比，
             # 若不拦截，相关性分量静默归零，召回会按重要性注入无关记忆。
@@ -288,9 +284,7 @@ class MemoryService:
         if store is None:
             return {"clusters": 0, "members_consolidated": 0, "semantic_ids": []}
 
-        sim_threshold = (
-            threshold if threshold is not None else config.memory_consolidate_threshold
-        )
+        sim_threshold = threshold if threshold is not None else config.memory_consolidate_threshold
 
         try:
             episodics = [
@@ -323,9 +317,7 @@ class MemoryService:
             for cluster in clusters:
                 merged = self._merge_cluster(cluster)
                 await self._submit_store("add", merged)
-                await asyncio.to_thread(
-                    store.mark_consolidated, [m.id for m in cluster], merged.id
-                )
+                await asyncio.to_thread(store.mark_consolidated, [m.id for m in cluster], merged.id)
                 semantic_ids.append(merged.id)
                 members_consolidated += len(cluster)
                 logger.info(
@@ -449,9 +441,7 @@ class MemoryService:
         if self.embedder is None:
             return None
         try:
-            embed_query_safe: Callable[[str], list[float] | None] = (
-                self.embedder.embed_query_safe
-            )
+            embed_query_safe: Callable[[str], list[float] | None] = self.embedder.embed_query_safe
             result = await asyncio.to_thread(embed_query_safe, text)
             return result
         except Exception as e:

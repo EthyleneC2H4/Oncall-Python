@@ -67,11 +67,7 @@ def repair_tool_call_continuity(messages: list[BaseMessage]) -> list[BaseMessage
             repaired.append(msg)
             continue
         if isinstance(msg, AIMessage) and msg.tool_calls:
-            unresolved = [
-                tc
-                for tc in msg.tool_calls
-                if str(tc.get("id")) not in survived_tool_ids
-            ]
+            unresolved = [tc for tc in msg.tool_calls if str(tc.get("id")) not in survived_tool_ids]
             if unresolved:
                 # 构造新实例避免原地修改共享消息对象
                 msg = AIMessage(

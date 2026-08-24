@@ -181,7 +181,10 @@ async def list_pending_actions():
     """列出待人工裁决的高风险动作"""
     store = get_pending_action_store()
     pending = await asyncio.to_thread(store.list_pending)
-    return {"code": 200, "data": {"total": len(pending), "actions": [_action_to_dict(a) for a in pending]}}
+    return {
+        "code": 200,
+        "data": {"total": len(pending), "actions": [_action_to_dict(a) for a in pending]},
+    }
 
 
 @router.post("/actions/{action_id}/approve")

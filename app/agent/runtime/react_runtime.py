@@ -85,9 +85,7 @@ class ReActRuntime(AgentRuntime):
         self._initialized = False
 
         default_registry.register(self)
-        logger.info(
-            f"ReActRuntime 初始化完成, model={self.model_name}, streaming={streaming}"
-        )
+        logger.info(f"ReActRuntime 初始化完成, model={self.model_name}, streaming={streaming}")
 
     async def ensure_ready(self) -> None:
         """异步初始化 Agent（包括 MCP 工具；幂等）"""
@@ -150,9 +148,7 @@ class ReActRuntime(AgentRuntime):
                 logger.warning(f"变体 '{prompt_variant}' 未登记，回退基线图")
                 await self.ensure_ready()
                 return self.agent, ""
-            variant_prompt = prompt_manager.render_composed(
-                "system_prompt", variant=prompt_variant
-            )
+            variant_prompt = prompt_manager.render_composed("system_prompt", variant=prompt_variant)
         except Exception as e:
             logger.warning(f"变体 '{prompt_variant}' 提示词渲染失败，回退基线: {e}")
             await self.ensure_ready()
@@ -167,15 +163,11 @@ class ReActRuntime(AgentRuntime):
             )
             agent_kwargs: dict[str, Any] = {
                 "checkpointer": self.checkpointer,
-                "middleware": [
-                    TokenTrimMiddleware(max_tokens=config.context_history_budget)
-                ],
+                "middleware": [TokenTrimMiddleware(max_tokens=config.context_history_budget)],
             }
             if variant_prompt:
                 agent_kwargs["system_prompt"] = variant_prompt
-            agent = create_agent(
-                model, tools=[*self.tools, *self.mcp_tools], **agent_kwargs
-            )
+            agent = create_agent(model, tools=[*self.tools, *self.mcp_tools], **agent_kwargs)
             logger.info(f"Prompt 变体 '{prompt_variant}' 编译图已构建并缓存")
             return variant_prompt, agent
 
@@ -219,7 +211,9 @@ class ReActRuntime(AgentRuntime):
             logger.warning(f"记忆召回失败（忽略）: {e}")
             return ""
 
-    async def _remember_turn(self, task: str, answer: str, tool_calls: int, session_id: str) -> None:
+    async def _remember_turn(
+        self, task: str, answer: str, tool_calls: int, session_id: str
+    ) -> None:
         """把本轮交互写入情景记忆（失败安全）"""
         if not answer.strip():
             return

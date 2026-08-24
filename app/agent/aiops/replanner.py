@@ -28,10 +28,12 @@ class Response(BaseModel):
 class Act(BaseModel):
     """重新规划的输出格式"""
 
-    action: str = Field(description="""下一步的行动，必须是以下三种之一：
+    action: str = Field(
+        description="""下一步的行动，必须是以下三种之一：
         - 'continue': 当前计划合理，继续执行下一个步骤
         - 'replan': 当前计划需要调整，提供新的步骤列表
-        - 'respond': 计划已完成且信息充足，生成最终响应""")
+        - 'respond': 计划已完成且信息充足，生成最终响应"""
+    )
     # action 为 'replan' 时，新的步骤列表（会替换当前剩余计划）
     new_steps: list[str] = Field(
         default_factory=list,

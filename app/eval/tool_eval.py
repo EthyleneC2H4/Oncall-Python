@@ -90,10 +90,7 @@ def _values_match(expected: Any, actual: Any, *, tolerance: float | None) -> boo
         if set(expected) != set(actual):
             return False
         return bool(
-            all(
-                _values_match(v, actual[k], tolerance=tolerance)
-                for k, v in expected.items()
-            )
+            all(_values_match(v, actual[k], tolerance=tolerance) for k, v in expected.items())
         )
     return bool(expected == actual)
 
@@ -128,8 +125,10 @@ def match_arguments(
             if sorted(map(_sort_key, exp)) != sorted(map(_sort_key, act)):
                 reasons.append(f"参数 {key} 集合不符: 期望 {exp!r}, 实际 {act!r}")
         elif not _values_match(exp, act, tolerance=float_tolerance):
-            reasons.append(f"参数 {key} 不符: 期望 {exp!r} ({type(exp).__name__}), "
-                           f"实际 {act!r} ({type(act).__name__})")
+            reasons.append(
+                f"参数 {key} 不符: 期望 {exp!r} ({type(exp).__name__}), "
+                f"实际 {act!r} ({type(act).__name__})"
+            )
 
     extra = sorted(set(actual) - {k for k in expected if expected[k] is not None})
     if extra:
@@ -247,7 +246,8 @@ def evaluate_scenario(
                 saw_failed_candidate = True
                 continue
             candidate = match_tool_call(
-                expected, entry,
+                expected,
+                entry,
                 unordered_lists=unordered_lists,
                 float_tolerance=float_tolerance,
             )

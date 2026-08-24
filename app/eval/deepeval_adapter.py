@@ -73,7 +73,7 @@ class DeepEvalAdapter:
             self._available = True
             logger.info("DeepEval 可用，启用 Agentic 评测指标")
         except ImportError:
-            logger.warning("DeepEval 未安装。Agentic 指标不可用。" "安装: pip install deepeval")
+            logger.warning("DeepEval 未安装。Agentic 指标不可用。安装: pip install deepeval")
         return self._available
 
     @property

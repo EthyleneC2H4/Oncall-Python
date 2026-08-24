@@ -91,7 +91,7 @@ class ContextAssembler:
 
         if rag_context:
             parts.append(
-                "## 相关经验文档\n\n" f"{self._truncate(rag_context, self.MAX_RAG_CHARS)}\n\n---"
+                f"## 相关经验文档\n\n{self._truncate(rag_context, self.MAX_RAG_CHARS)}\n\n---"
             )
 
         return "\n\n".join(parts)

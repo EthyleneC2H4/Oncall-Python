@@ -179,9 +179,7 @@ class PromptRegressionRunner:
                     pass
 
         prompt = (
-            (f"{system_prompt}\n\n" f"## 用户问题\n{query}\n\n" "## 回答\n")
-            if system_prompt
-            else query
+            (f"{system_prompt}\n\n## 用户问题\n{query}\n\n## 回答\n") if system_prompt else query
         )
 
         try:
@@ -222,7 +220,9 @@ class PromptRegressionRunner:
             "verdict": (
                 "PASS"
                 if degraded_count == 0 and avg_faith_diff >= 0
-                else "WARN" if degraded_count <= 2 else "FAIL"
+                else "WARN"
+                if degraded_count <= 2
+                else "FAIL"
             ),
         }
 
@@ -236,9 +236,9 @@ class PromptRegressionRunner:
             "UNKNOWN": "[????]",
         }.get(verdict, "[????]")
 
-        print(f"\n{'='*50}")
+        print(f"\n{'=' * 50}")
         print(f"Prompt 回归评测结论: {icon} {verdict}")
-        print(f"{'='*50}")
+        print(f"{'=' * 50}")
         print(f"  总用例数: {summary.get('total_cases', '?')}")
         print(f"  退化: {summary.get('degraded_count', '?')} 个")
         print(f"  提升: {summary.get('improved_count', '?')} 个")

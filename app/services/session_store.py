@@ -45,7 +45,9 @@ class SessionStore:
             else:
                 checkpoint_data = getattr(checkpoint_result, "checkpoint", {}) or {}
 
-            checkpoint_dict: dict = dict(checkpoint_data) if isinstance(checkpoint_data, dict) else {}
+            checkpoint_dict: dict = (
+                dict(checkpoint_data) if isinstance(checkpoint_data, dict) else {}
+            )
             channel_values = checkpoint_dict.get("channel_values") or {}
             messages = (
                 list(channel_values.get("messages") or [])

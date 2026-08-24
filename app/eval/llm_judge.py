@@ -148,20 +148,15 @@ class LLMJudge:
         score = int(score_match.group(1)) if score_match else 0
         return {"score": score, "reason": content[:200]}
 
-
     # ──────────────── P4: Pairwise 对比评测 ────────────────
 
-    async def judge_pairwise(
-        self, question: str, answer_a: str, answer_b: str
-    ) -> dict:
+    async def judge_pairwise(self, question: str, answer_a: str, answer_b: str) -> dict:
         """两个回答的对比裁决（位置偏差控制：先 A 后 B 单次裁决）
 
         Returns:
             {"winner": "A"|"B"|"tie", "reason": "..."}
         """
-        prompt = PAIRWISE_PROMPT.format(
-            question=question, answer_a=answer_a, answer_b=answer_b
-        )
+        prompt = PAIRWISE_PROMPT.format(question=question, answer_a=answer_a, answer_b=answer_b)
         try:
             result = await self.llm.ainvoke(prompt)
             parsed = _parse_pairwise(result.content)
@@ -265,9 +260,7 @@ def cohens_kappa(labels_a: list[str], labels_b: list[str]) -> float:
 
     p_o = sum(1 for a, b in zip(labels_a, labels_b, strict=True) if a == b) / n
     categories = set(labels_a) | set(labels_b)
-    p_e = sum(
-        (labels_a.count(c) / n) * (labels_b.count(c) / n) for c in categories
-    )
+    p_e = sum((labels_a.count(c) / n) * (labels_b.count(c) / n) for c in categories)
     if p_e == 1.0:
         # 两评委各自只标一类：观测一致率必为 1，约定返回 1.0
         return 1.0 if p_o == 1.0 else 0.0

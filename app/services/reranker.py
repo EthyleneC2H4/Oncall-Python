@@ -8,7 +8,6 @@
 模型懒加载；可通过 config.rerank_enabled=False 关闭（直接返回原始排序）。
 """
 
-
 from langchain_core.documents import Document
 from loguru import logger
 

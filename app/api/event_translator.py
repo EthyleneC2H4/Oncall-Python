@@ -105,9 +105,7 @@ def agent_event_to_legacy(
         return {
             "type": "complete",
             "stage": "complete",
-            "message": (
-                "任务执行完成" if not timed_out else "任务超时，已生成部分报告"
-            ),
+            "message": ("任务执行完成" if not timed_out else "任务超时，已生成部分报告"),
             "response": response,
             "timed_out": timed_out,
         }

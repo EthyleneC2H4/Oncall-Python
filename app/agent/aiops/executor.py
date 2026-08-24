@@ -43,8 +43,7 @@ async def executor(state: PlanExecuteState) -> dict[str, Any]:
     # 退化为纯 legacy 路径（宁可少一次直连优化，不可错位执行）
     if structured and len(structured) != len(plan):
         logger.warning(
-            f"plan({len(plan)}) 与 plan_structured({len(structured)}) 数量错位，"
-            "本次弃用结构化视图"
+            f"plan({len(plan)}) 与 plan_structured({len(structured)}) 数量错位，本次弃用结构化视图"
         )
         structured = []
 
@@ -53,7 +52,10 @@ async def executor(state: PlanExecuteState) -> dict[str, Any]:
     step_dict = structured[0] if structured else None
     if step_dict and str(step_dict.get("description") or "").strip():
         task = str(step_dict["description"])
-    logger.info(f"当前任务: {task}" + (f" [tool={step_dict.get('tool')}]" if step_dict and step_dict.get("tool") else ""))
+    logger.info(
+        f"当前任务: {task}"
+        + (f" [tool={step_dict.get('tool')}]" if step_dict and step_dict.get("tool") else "")
+    )
 
     async def _execute_direct(tool_name: str, args: dict) -> str:
         """P3 直连路径：经 guard 执行绑定工具，不走 LLM 决策"""
@@ -70,7 +72,8 @@ async def executor(state: PlanExecuteState) -> dict[str, Any]:
 
         # 观测关联 ID 随痕迹落盘（缺省空串——BFCL 会话过滤依赖非空 session_id）
         result = await guarded_call(
-            matched, args,
+            matched,
+            args,
             request_id=str(state.get("request_id", "")),
             session_id=str(state.get("session_id", "")),
         )
@@ -107,7 +110,8 @@ async def executor(state: PlanExecuteState) -> dict[str, Any]:
         tool_node = ToolNode(all_tools)
 
         messages = [
-            SystemMessage(content=f"""你是一个能力强大的助手，负责执行具体的任务步骤。
+            SystemMessage(
+                content=f"""你是一个能力强大的助手，负责执行具体的任务步骤。
 
 你可以使用各种工具来完成任务。对于每个步骤：
 1. 理解步骤的目标
@@ -121,7 +125,8 @@ async def executor(state: PlanExecuteState) -> dict[str, Any]:
 - 执行结果要清晰、准确
 - 专注于当前步骤，不要考虑其他任务
 
-{AGENT_RULES}"""),
+{AGENT_RULES}"""
+            ),
             HumanMessage(content=f"请执行以下任务: {task}"),
         ]
 

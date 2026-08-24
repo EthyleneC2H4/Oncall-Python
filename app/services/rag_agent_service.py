@@ -59,9 +59,7 @@ class RagAgentService:
 
             template = prompt_manager.get("system_prompt")
             if template:
-                composed = prompt_manager.render_composed(
-                    "system_prompt", variant=variant
-                )
+                composed = prompt_manager.render_composed("system_prompt", variant=variant)
                 effective = prompt_manager.effective_variant("system_prompt", variant)
                 logger.debug(
                     f"加载 Prompt 模板: system_prompt v{template.version}"

@@ -56,7 +56,9 @@ def translate_graph_update(
         if node_name == NODE_PLANNER:
             events.extend(_translate_planner(node_output, emitter))
         elif node_name == NODE_EXECUTOR:
-            events.extend(_translate_executor(node_output, emitter, steps_done_base=steps_done_base))
+            events.extend(
+                _translate_executor(node_output, emitter, steps_done_base=steps_done_base)
+            )
         elif node_name == NODE_REPLANNER:
             events.extend(_translate_replanner(node_output, emitter))
     return events

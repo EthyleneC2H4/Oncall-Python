@@ -56,8 +56,7 @@ async def retry_interceptor(
         except Exception as e:
             last_error = e
             logger.warning(
-                f"MCP 工具 {request.name} 调用失败 "
-                f"(第 {attempt + 1}/{max_retries} 次): {str(e)}"
+                f"MCP 工具 {request.name} 调用失败 (第 {attempt + 1}/{max_retries} 次): {str(e)}"
             )
 
             # 如果不是最后一次尝试，等待后重试
@@ -207,9 +206,7 @@ async def get_mcp_tools(
         tools = await client.get_tools()
     except Exception as e:
         if _mcp_tools_cache:
-            logger.warning(
-                f"MCP 工具拉取失败，回退使用过期缓存 ({len(_mcp_tools_cache)} 个): {e}"
-            )
+            logger.warning(f"MCP 工具拉取失败，回退使用过期缓存 ({len(_mcp_tools_cache)} 个): {e}")
             return _mcp_tools_cache
         raise
 

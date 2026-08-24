@@ -74,17 +74,26 @@ async def guarded_call(
             if needs_confirm:
                 if not approved_action_id:
                     return await _propose_confirmation(
-                        name, call_args, reason=reason,
-                        request_id=request_id, session_id=session_id,
+                        name,
+                        call_args,
+                        reason=reason,
+                        request_id=request_id,
+                        session_id=session_id,
                     )
                 # 凭证校验：只认已批准/已被补执行认领的动作
                 claimed = get_pending_action_store().get(approved_action_id)
-                if claimed is None or claimed.tool_name != name or claimed.status not in (
-                    ActionStatus.APPROVED,
-                    ActionStatus.EXECUTED,
+                if (
+                    claimed is None
+                    or claimed.tool_name != name
+                    or claimed.status
+                    not in (
+                        ActionStatus.APPROVED,
+                        ActionStatus.EXECUTED,
+                    )
                 ):
-                    _audit(name, call_args, "rejected", started, request_id,
-                           error="无效的补执行凭证")
+                    _audit(
+                        name, call_args, "rejected", started, request_id, error="无效的补执行凭证"
+                    )
                     return GuardResult(
                         ok=False,
                         error="补执行凭证无效（动作不存在、未批准或与工具不符）",
@@ -120,8 +129,12 @@ async def guarded_call(
     except Exception as e:  # noqa: BLE001 - 咽喉契约：失败折叠为结果对象
         _audit(name, call_args, "error", started, request_id, error=str(e))
         tool_trace_sink.record(
-            name, call_args, request_id=request_id,
-            session_id=session_id, ok=False, error=str(e),
+            name,
+            call_args,
+            request_id=request_id,
+            session_id=session_id,
+            ok=False,
+            error=str(e),
         )
         logger.error(f"guard 执行 {name} 失败: {e}")
         return GuardResult(ok=False, error=str(e))
@@ -150,8 +163,11 @@ async def execute_approved(action: PendingAction) -> GuardResult:
         return GuardResult(ok=False, error=message)
 
     result = await guarded_call(
-        tool, claimed.args, request_id=claimed.request_id,
-        session_id=claimed.session_id, approved_action_id=action.action_id,
+        tool,
+        claimed.args,
+        request_id=claimed.request_id,
+        session_id=claimed.session_id,
+        approved_action_id=action.action_id,
     )
     # 补执行时确认门不再二次拦截（人已批准）；防御性处理意外状态
     if result.needs_confirmation:
@@ -281,4 +297,3 @@ async def _find_tool(name: str) -> Any | None:
     except Exception as e:  # noqa: BLE001 - MCP 不可达时仍可回退本地查找结果
         logger.warning(f"补执行查找 MCP 工具失败: {e}")
     return None
-

@@ -70,7 +70,9 @@ def _row_to_item(row: sqlite3.Row) -> MemoryItem:
     except (TypeError, ValueError):
         # REAL 亲和列仍可能被写入非数值 TEXT（迁移/手改库）；
         # 边界容错同时保护 recall / consolidate / to_dict 三处消费方
-        logger.warning(f"记忆行 {row['id']!r} importance 非数值({row['importance']!r})，回退默认 0.3")
+        logger.warning(
+            f"记忆行 {row['id']!r} importance 非数值({row['importance']!r})，回退默认 0.3"
+        )
         importance = 0.3
     return MemoryItem(
         id=row["id"],
