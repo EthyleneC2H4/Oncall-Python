@@ -17,6 +17,28 @@ KG_DATA_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "kg_data.json
 class KnowledgeGraphService:
     """运维知识图谱服务"""
 
+    # 口语关键词 → 告警节点（图检索通道与模糊匹配共用）
+    ALERT_KEYWORDS: dict[str, str] = {
+        "cpu": "HighCPUUsage",
+        "内存": "HighMemoryUsage",
+        "memory": "HighMemoryUsage",
+        "mem": "HighMemoryUsage",
+        "磁盘": "HighDiskUsage",
+        "disk": "HighDiskUsage",
+        "响应": "SlowResponse",
+        "slow": "SlowResponse",
+        "慢": "SlowResponse",
+        "不可用": "ServiceUnavailable",
+        "unavailable": "ServiceUnavailable",
+        "崩溃": "ServiceUnavailable",
+        "crash": "ServiceUnavailable",
+        "oom": "OOMError",
+        "错误率": "HighErrorRate",
+        "error": "HighErrorRate",
+        "gc": "FrequentGC",
+        "健康检查": "HealthCheckFailed",
+    }
+
     def __init__(self):
         self.graph = nx.DiGraph()
         self._build_default_graph()
@@ -418,29 +440,8 @@ class KnowledgeGraphService:
     def _fuzzy_match_alert(self, query: str) -> str | None:
         """模糊匹配告警名称"""
         query_lower = query.lower()
-        # 关键词映射
-        keyword_map = {
-            "cpu": "HighCPUUsage",
-            "内存": "HighMemoryUsage",
-            "memory": "HighMemoryUsage",
-            "mem": "HighMemoryUsage",
-            "磁盘": "HighDiskUsage",
-            "disk": "HighDiskUsage",
-            "响应": "SlowResponse",
-            "slow": "SlowResponse",
-            "慢": "SlowResponse",
-            "不可用": "ServiceUnavailable",
-            "unavailable": "ServiceUnavailable",
-            "崩溃": "ServiceUnavailable",
-            "crash": "ServiceUnavailable",
-            "oom": "OOMError",
-            "错误率": "HighErrorRate",
-            "error": "HighErrorRate",
-            "gc": "FrequentGC",
-            "健康检查": "HealthCheckFailed",
-        }
 
-        for keyword, alert in keyword_map.items():
+        for keyword, alert in self.ALERT_KEYWORDS.items():
             if keyword in query_lower:
                 return alert
 
@@ -498,6 +499,16 @@ class KnowledgeGraphService:
         logger.info(f"图谱增量更新: +{nodes_added} 节点, +{edges_added} 边")
         return {"nodes_added": nodes_added, "edges_added": edges_added}
 
+    # 学习输入的净化上限：节点名/label 会被序列化进 LLM 检索上下文，
+    # 无界文本既拖垮 token 预算也构成持久化注入面（外部反馈可直达此处）
+    _MAX_LEARNED_TEXT = 120
+
+    @classmethod
+    def _sanitize_learning_text(cls, text: Any) -> str:
+        """控制字符剔除 + 截断——学习边界对任意来源的输入兜底"""
+        s = str(text or "")
+        return "".join(ch for ch in s if ch.isprintable())[: cls._MAX_LEARNED_TEXT]
+
     def update_from_incident(self, incident_data: dict) -> dict:
         """从已解决的故障事件中学习，增量更新图谱
 
@@ -510,11 +521,15 @@ class KnowledgeGraphService:
         edges_added = 0
         nodes_added = 0
 
-        alert_type = incident_data.get("alert_type", "")
-        root_cause = incident_data.get("root_cause", "")
-        resolution = incident_data.get("resolution", "")
-        cascade_alerts = incident_data.get("cascade_alerts", [])
-        incident_id = incident_data.get("incident_id", "unknown")
+        alert_type = self._sanitize_learning_text(incident_data.get("alert_type", ""))
+        root_cause = self._sanitize_learning_text(incident_data.get("root_cause", ""))
+        resolution = self._sanitize_learning_text(incident_data.get("resolution", ""))
+        cascade_alerts = [
+            self._sanitize_learning_text(c) for c in incident_data.get("cascade_alerts", [])
+        ]
+        incident_id = self._sanitize_learning_text(
+            incident_data.get("incident_id", "unknown"),
+        )
 
         # 确保告警节点存在
         if alert_type and alert_type not in self.graph:

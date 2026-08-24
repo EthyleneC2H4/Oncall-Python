@@ -219,6 +219,7 @@ class PlanExecuteRuntime(AgentRuntime):
                 "diagnosis_events": [],
                 "error_context": [],
                 "degradation_level": "none",
+                "session_id": session_id,  # 观测关联：工具痕迹按会话归组（P4）
             }
 
             config_dict = {"configurable": {"thread_id": session_id}}

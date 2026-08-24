@@ -5,12 +5,13 @@
 配合 ragas_evaluator.py 和 llm_judge.py 实现完整评测体系。
 """
 
-import json
 import time
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
+
+from app.eval.dataset_registry import read_cases
 
 
 class AIOpsEvaluator:
@@ -75,7 +76,7 @@ class AIOpsEvaluator:
         return self._test_cases
 
     def _load_cases(self) -> list[dict]:
-        """从 eval/datasets/ 加载用例"""
+        """从 eval/datasets/ 加载用例（经 dataset_registry 兼容版本信封）"""
         cases = []
         diagnostic_file = self.datasets_dir / "diagnostic_cases.json"
         negative_file = self.datasets_dir / "negative_cases.json"
@@ -83,8 +84,7 @@ class AIOpsEvaluator:
         for filepath in [diagnostic_file, negative_file]:
             if filepath.exists():
                 try:
-                    with open(filepath, encoding="utf-8") as f:
-                        data = json.load(f)
+                    data = read_cases(filepath)
                     # 兼容旧格式：补充 relevant_docs 字段
                     for case in data:
                         if "relevant_docs" not in case:

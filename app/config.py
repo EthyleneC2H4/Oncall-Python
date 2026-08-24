@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     pending_actions_db_path: str = "data/pending_actions.db"  # sqlite 存储路径
     pending_action_ttl_seconds: float = 900.0  # 待审动作过期时间（15 分钟）
 
+    # 工具调用痕迹（P4 BFCL 式评测数据源）
+    tool_trace_enabled: bool = True  # 关闭后 guard 不再写 data/traces/
+    traces_dir: str = "data/traces"
+
     # OpenRouter 配置（OpenAI 兼容模式）
     openrouter_api_key: str = ""  # 默认空字符串，实际使用需从环境变量 OPENROUTER_API_KEY 加载
     openrouter_base_url: str = "https://openrouter.ai/api/v1"

@@ -23,6 +23,7 @@ from loguru import logger
 
 from app.config import config
 from app.core.llm_factory import LLMFactory
+from app.eval.dataset_registry import read_cases
 
 
 def _install_ragas_compat_shim() -> None:
@@ -85,8 +86,8 @@ class RAGASEvaluator:
         if not filepath.exists():
             logger.warning(f"评测集文件不存在: {filepath}")
             return []
-        with open(filepath, encoding="utf-8") as f:
-            cases: list[dict] = json.load(f)
+        # 经 dataset_registry 宽松读取：兼容版本信封与 legacy 裸列表
+        cases: list[dict] = read_cases(filepath)
         logger.info(f"加载评测集: {filename}, {len(cases)} 个用例")
         return cases
 

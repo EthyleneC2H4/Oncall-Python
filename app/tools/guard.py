@@ -24,6 +24,7 @@ from typing import Any
 from loguru import logger
 
 from app.core.audit import audit_logger
+from app.core.trace_sink import tool_trace_sink
 from app.services.pending_actions import (
     ActionStatus,
     PendingAction,
@@ -109,11 +110,19 @@ async def guarded_call(
         status = "success"
         latency_ms = (time.perf_counter() - started) * 1000
         _audit(name, call_args, status, started, request_id)
+        # 完整实参另落评测痕迹（与审计分离：审计只存摘要）
+        tool_trace_sink.record(
+            name, call_args, request_id=request_id, session_id=session_id, ok=True
+        )
         logger.info(f"guard 放行执行 {name} ({latency_ms:.0f}ms, 未注册={unregistered})")
         return GuardResult(ok=True, value=result)
 
     except Exception as e:  # noqa: BLE001 - 咽喉契约：失败折叠为结果对象
         _audit(name, call_args, "error", started, request_id, error=str(e))
+        tool_trace_sink.record(
+            name, call_args, request_id=request_id,
+            session_id=session_id, ok=False, error=str(e),
+        )
         logger.error(f"guard 执行 {name} 失败: {e}")
         return GuardResult(ok=False, error=str(e))
 

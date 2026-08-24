@@ -7,6 +7,7 @@
 支持 HyDE（假设文档嵌入）：先生成假设性答案再检索，提升模糊查询召回率。
 支持 BM25 稀疏检索：关键词精确匹配，与向量语义检索互补。
 支持 Rerank 精排：使用 cross-encoder 对粗召回结果重排，提升 top-k 精度。
+支持混合四通道检索（P4）：[向量, HyDE, BM25, 知识图谱] → N 路 RRF 融合。
 """
 
 
@@ -20,6 +21,7 @@ from app.core.degradation import DegradationLevel
 from app.core.health_registry import health_registry
 from app.core.llm_factory import LLMFactory
 from app.services.bm25_retriever import bm25_retriever
+from app.services.graph_retriever import graph_retriever
 from app.services.query_rewriter import query_rewriter
 from app.services.reranker import reranker
 from app.services.vector_store_manager import vector_store_manager
@@ -223,6 +225,91 @@ async def retrieve_with_rewrite_and_rerank(
         return str(result), []
 
 
+async def retrieve_hybrid(query: str, top_k: int | None = None) -> tuple[str, list[Document]]:
+    """四通道混合检索（P4）：[向量, HyDE, BM25, 知识图谱] → N 路 RRF → Rerank
+
+    在 rewrite+rerank 链路之上新增两路：
+    - HyDE 假设答案向量检索（LLM 可用时）
+    - KG 一跳子图检索（graph_retriever；结构化因果知识，与文档语义互补）
+
+    单通道失败只记警告并丢弃该路，其余通道照常融合——
+    检索面整体可用性高于任何单路的最优性。
+
+    Returns:
+        (格式化上下文, 文档列表)
+    """
+    if top_k is None:
+        top_k = config.rag_top_k
+
+    try:
+        logger.info(f"混合四通道检索启动: query='{query}'")
+
+        rewritten_query = await query_rewriter.rewrite(query)
+        vector_store = vector_store_manager.get_vector_store()
+
+        channel_lists: list[list] = []
+
+        # 通道 1：改写查询向量检索
+        try:
+            vector_results = vector_store.similarity_search_with_score(
+                str(rewritten_query), k=top_k + 3
+            )
+            channel_lists.append(vector_results)
+        except Exception as e:  # noqa: BLE001 - 单通道失败不拖垮融合
+            logger.warning(f"混合检索·向量通道失败（跳过）: {e}")
+
+        # 通道 2：HyDE 假设答案向量检索（需 LLM）
+        if health_registry.is_available("llm"):
+            try:
+                llm = LLMFactory.create_chat_model(
+                    streaming=False, model=config.rag_model, temperature=0.3
+                )
+                hypothesis = await llm.ainvoke(
+                    "请写一段关于以下问题的详细回答"
+                    f"（假设你知道答案，直接给出具体内容）：\n{rewritten_query}"
+                )
+                hyde_results = vector_store.similarity_search_with_score(
+                    str(hypothesis.content), k=top_k + 3
+                )
+                channel_lists.append(hyde_results)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"混合检索·HyDE 通道失败（跳过）: {e}")
+        else:
+            logger.info("LLM 不可用，HyDE 通道跳过")
+
+        # 通道 3：BM25 关键词检索
+        try:
+            bm25_results = bm25_retriever.search(str(rewritten_query), top_k=top_k + 3)
+            channel_lists.append(bm25_results)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"混合检索·BM25 通道失败（跳过）: {e}")
+
+        # 通道 4：知识图谱一跳子图
+        try:
+            kg_docs = graph_retriever.retrieve(query)
+        except Exception as e:  # noqa: BLE001 - 单通道失败不拖垮融合
+            logger.warning(f"混合检索·图谱通道失败（跳过）: {e}")
+            kg_docs = []
+
+        merged_docs = _rrf_merge_n(channel_lists, extra_docs=kg_docs, top_k=top_k + 4)
+        if not merged_docs:
+            return "混合检索未找到相关文档。", []
+
+        reranked_docs = await reranker.rerank(
+            query=query, documents=merged_docs, top_n=top_k
+        )
+        context = format_docs(reranked_docs)
+        logger.info(f"混合检索完成: 融合 {len(merged_docs)} → 精排 {len(reranked_docs)}")
+        return context, reranked_docs
+
+    except Exception as e:
+        logger.error(f"混合检索失败: {e}, 降级为普通检索")
+        result = retrieve_knowledge.invoke({"query": query})
+        if isinstance(result, tuple):
+            return result
+        return str(result), []
+
+
 def _filter_by_relevance(
     docs_with_scores: list,
     threshold: float,
@@ -299,6 +386,48 @@ def _rrf_merge(
     return [doc for _, doc in sorted_docs[:top_k]]
 
 
+def _rrf_merge_n(
+    result_lists: list[list],
+    top_k: int = 5,
+    k: int = 60,
+    extra_docs: list[Document] | None = None,
+) -> list[Document]:
+    """RRF 泛化：融合任意 N 路检索结果（P4）
+
+    RRF score = Σ 1 / (k + rank_i)，文档按前 100 字符去重；
+    extra_docs 作为无分数的第 N+1 路（如 KG 子图文档）从 rank 0 计分。
+
+    Args:
+        result_lists: 每路为 [(Document, score), ...] 或 [Document, ...]
+        top_k: 返回数量
+        k: RRF 平滑参数
+        extra_docs: 追加通道的裸文档列表
+
+    Returns:
+        融合去重后的文档列表
+    """
+    doc_scores: dict[str, tuple[float, Document]] = {}
+
+    def _add(doc: Document, rank: int) -> None:
+        doc_id = doc.page_content[:100]
+        rrf_score = 1.0 / (k + rank)
+        if doc_id in doc_scores:
+            doc_scores[doc_id] = (doc_scores[doc_id][0] + rrf_score, doc)
+        else:
+            doc_scores[doc_id] = (rrf_score, doc)
+
+    for results in result_lists:
+        for rank, item in enumerate(results):
+            doc = item[0] if isinstance(item, tuple) else item
+            _add(doc, rank)
+
+    for rank, doc in enumerate(extra_docs or []):
+        _add(doc, rank)
+
+    sorted_docs = sorted(doc_scores.values(), key=lambda x: x[0], reverse=True)
+    return [doc for _, doc in sorted_docs[:top_k]]
+
+
 def _rrf_merge_three(
     results_a: list,
     results_b: list,
@@ -342,12 +471,13 @@ async def retrieve_with_degradation(
 ) -> tuple[str, list[Document], DegradationLevel]:
     """按降级层级检索，逐级降级直到获得结果
 
-    Level 0: 完整链路 (向量+BM25+RRF+Rerank)
+    Level 0: 混合四通道 (向量+HyDE+BM25+KG+RRF+Rerank)
     Level 1: 无 Rerank (向量+BM25+RRF)
     Level 2: BM25-only (带改写)
     Level 3: BM25-only (原始查询)
-    Level 4: 缓存
-    Level 5: 静态兜底
+    Level 4: KG-only (知识图谱子图，文档检索全不可用时)
+    Level 5: 缓存
+    Level 6: 静态兜底
 
     Returns:
         (格式化上下文, 原始文档列表, 降级等级)
@@ -355,7 +485,8 @@ async def retrieve_with_degradation(
     if top_k is None:
         top_k = config.rag_top_k
 
-    # 检查缓存
+    # 检查缓存（只有健康档 L0 的结果才写入——降级档是瞬态质量，
+    # 缓存会把 KG_ONLY/BM25 劣化档在服务恢复后仍钉住一个 TTL 窗口）
     cache_key = make_cache_key("retrieval", query, str(top_k))
     cached = retrieval_cache.get(cache_key)
     if cached is not None:
@@ -366,11 +497,11 @@ async def retrieve_with_degradation(
     rerank_ok = health_registry.is_available("rerank")
     llm_ok = health_registry.is_available("llm")
 
-    # Level 0: 完整链路
+    # Level 0: 混合四通道完整链路
     if milvus_ok and rerank_ok:
         try:
             if llm_ok:
-                ctx, docs = await retrieve_with_rewrite_and_rerank(query, top_k)
+                ctx, docs = await retrieve_hybrid(query, top_k)
             else:
                 ctx, docs = retrieve_knowledge.invoke({"query": query})
                 if isinstance(ctx, str) and not docs:
@@ -397,7 +528,6 @@ async def retrieve_with_degradation(
             merged = _rrf_merge(vector_results, bm25_results, top_k=top_k)
             if merged:
                 ctx = format_docs(merged)
-                retrieval_cache.set(cache_key, (ctx, merged))
                 return ctx, merged, DegradationLevel.NO_RERANK
         except Exception as e:
             logger.warning(f"无 Rerank 检索失败: {e}")
@@ -410,7 +540,6 @@ async def retrieve_with_degradation(
             docs = [doc for doc, _ in bm25_results]
             if docs:
                 ctx = format_docs(docs)
-                retrieval_cache.set(cache_key, (ctx, docs))
                 return ctx, docs, DegradationLevel.BM25_ONLY
         except Exception as e:
             logger.warning(f"BM25+改写检索失败: {e}")
@@ -421,12 +550,20 @@ async def retrieve_with_degradation(
         docs = [doc for doc, _ in bm25_results]
         if docs:
             ctx = format_docs(docs)
-            retrieval_cache.set(cache_key, (ctx, docs))
             return ctx, docs, DegradationLevel.BM25_RAW
     except Exception as e:
         logger.warning(f"BM25 原始检索失败: {e}")
 
-    # Level 4: 静态兜底
+    # Level 4: KG-only —— 文档检索全不可用，但图谱子图仍可提供结构化因果知识
+    try:
+        kg_docs = graph_retriever.retrieve(query)
+        if kg_docs:
+            ctx = format_docs(kg_docs)
+            return ctx, kg_docs, DegradationLevel.KG_ONLY
+    except Exception as e:  # noqa: BLE001 - 图检索也失败则继续走静态兜底
+        logger.warning(f"KG-only 检索失败: {e}")
+
+    # Level 5: 静态兜底
     logger.warning("所有检索路径均失败，返回静态兜底")
     return "没有找到相关信息，请稍后重试。", [], DegradationLevel.TEMPLATE
 

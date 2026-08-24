@@ -17,6 +17,16 @@
 
     # 冒烟
     python -m app.eval.ci_runner --mode smoke
+
+P4 套件（--suite，与 --mode 二选一）：
+    # BFCL 式工具调用评测：回放 data/traces/tools.jsonl 对比版本化金标（离线免费）
+    python -m app.eval.ci_runner --suite bfcl
+
+    # GAIA 式任务分级评测：对最近一次端到端运行的答案定级（离线免费）
+    python -m app.eval.ci_runner --suite gaia
+
+    # LLM Judge pairwise 胜率（调用 LLM，花钱——只挂 workflow_dispatch 手动触发）
+    python -m app.eval.ci_runner --suite judge
 """
 
 import argparse
@@ -26,6 +36,25 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
+
+# 套件 → 数据集/痕迹默认路径（相对仓库根）
+SUITE_DEFAULT_PATHS = {
+    "bfcl": {
+        "traces": "data/traces/tools.jsonl",
+        "dataset": "eval/datasets/tool_expectations.json",
+    },
+    "gaia": {
+        "answers": "data/eval/latest_answers.json",
+        "dataset": "eval/datasets/task_cases.json",
+    },
+    "judge": {
+        "pairs": "eval/datasets/judge_pairs.json",
+    },
+}
+
+# 套件门禁阈值
+BFCL_MIN_TOOL_MATCH = 0.8
+GAIA_MIN_AVG_SCORE = 0.7
 
 # CI 门禁阈值配置
 CI_THRESHOLDS = {
@@ -178,6 +207,171 @@ class CIEvalRunner:
         self._save_report(report, "full")
         return report
 
+    # ──────────────── P4 套件：bfcl / gaia / judge ────────────────
+
+    def run_bfcl(
+        self,
+        traces_path: str | None = None,
+        dataset_path: str | None = None,
+    ) -> dict[str, Any]:
+        """BFCL 式工具调用评测（离线）：痕迹回放 × 版本化金标
+
+        数据缺失时返回 skipped 报告而非失败——CI 里「没跑过系统」
+        与「系统跑错了」是两种信号。
+        """
+        from app.eval.dataset_registry import DatasetRegistryError, load_versioned
+        from app.eval.tool_eval import evaluate_scenario, load_traces
+
+        paths = SUITE_DEFAULT_PATHS["bfcl"]
+        traces_file = Path(traces_path or paths["traces"])
+        dataset_file = Path(dataset_path or paths["dataset"])
+
+        entries = load_traces(traces_file)
+        if not entries:
+            report = self._skipped_report("bfcl", f"无工具调用痕迹: {traces_file}")
+            self._save_report(report, "bfcl")
+            return report
+
+        try:
+            cases, manifest = load_versioned(dataset_file)
+        except DatasetRegistryError as e:
+            report = self._skipped_report("bfcl", f"金标集不可用: {e}")
+            self._save_report(report, "bfcl")
+            return report
+
+        scores = []
+        for case in cases:
+            expected = list(case.get("expected_tool_calls") or [])
+            session_filter = case.get("session_id")
+            pool = [t for t in entries if not session_filter or t.session_id == session_filter]
+            scores.append(
+                evaluate_scenario(str(case.get("id", "")), expected, pool)
+            )
+
+        avg_match: float = (
+            round(sum(s.score for s in scores) / len(scores), 4) if scores else 0.0
+        )
+        fully_matched = sum(1 for s in scores if s.score == 1.0)
+        summary: dict[str, Any] = {
+            "scenarios": len(scores),
+            "avg_tool_match": avg_match,
+            "fully_matched": fully_matched,
+            "dataset_version": manifest.version,
+        }
+        report = {
+            "mode": "suite_bfcl",
+            "timestamp": time.time(),
+            "summary": summary,
+            "scenario_details": [
+                {"id": s.scenario_id, "score": s.score,
+                 "failed": [d for d in s.details if not d["matched"]]}
+                for s in scores
+            ],
+            "passed": avg_match >= BFCL_MIN_TOOL_MATCH,
+        }
+        self._save_report(report, "bfcl")
+        self._print_suite_result(report)
+        return report
+
+    def run_gaia(
+        self,
+        answers_path: str | None = None,
+        dataset_path: str | None = None,
+    ) -> dict[str, Any]:
+        """GAIA 式任务分级评测（离线）：最近端到端答案 × 版本化金标"""
+        from app.eval.dataset_registry import DatasetRegistryError, load_versioned
+        from app.eval.task_eval import evaluate_case, summarize
+
+        paths = SUITE_DEFAULT_PATHS["gaia"]
+        answers_file = Path(answers_path or paths["answers"])
+        dataset_file = Path(dataset_path or paths["dataset"])
+
+        if not answers_file.exists():
+            report = self._skipped_report("gaia", f"无端到端答案文件: {answers_file}")
+            self._save_report(report, "gaia")
+            return report
+        with open(answers_file, encoding="utf-8") as f:
+            answers: dict = json.load(f)
+
+        try:
+            cases, manifest = load_versioned(dataset_file)
+        except DatasetRegistryError as e:
+            report = self._skipped_report("gaia", f"金标集不可用: {e}")
+            self._save_report(report, "gaia")
+            return report
+
+        verdicts = []
+        for case in cases:
+            case_id = str(case.get("id", ""))
+            answer = str(answers.get(case_id, ""))
+            if not answer:
+                continue  # 该用例本次未运行，不计分
+            verdicts.append(evaluate_case(case, answer))
+
+        summary = summarize(verdicts)
+        summary["answered_cases"] = len(verdicts)
+        summary["missing_answers"] = len(cases) - len(verdicts)
+        summary["dataset_version"] = manifest.version
+        threshold = GAIA_MIN_AVG_SCORE
+        report = {
+            "mode": "suite_gaia",
+            "timestamp": time.time(),
+            "summary": summary,
+            "passed": summary["avg_score"] >= threshold and summary["total"] > 0,
+        }
+        self._save_report(report, "gaia")
+        self._print_suite_result(report)
+        return report
+
+    async def run_judge(self, pairs_path: str | None = None) -> dict[str, Any]:
+        """LLM Judge pairwise 胜率评测——花钱套件，仅 workflow_dispatch 手动触发"""
+        from app.eval.llm_judge import llm_judge, pairwise_win_rate
+
+        pairs_file = Path(pairs_path or SUITE_DEFAULT_PATHS["judge"]["pairs"])
+        if not pairs_file.exists():
+            report = self._skipped_report("judge", f"无比对集: {pairs_file}")
+            self._save_report(report, "judge")
+            return report
+        with open(pairs_file, encoding="utf-8") as f:
+            pairs = json.load(f)
+
+        judgements = []
+        for pair in pairs:
+            verdict = await llm_judge.judge_pairwise(
+                question=str(pair.get("question", "")),
+                answer_a=str(pair.get("answer_a", "")),
+                answer_b=str(pair.get("answer_b", "")),
+            )
+            judgements.append({"winner": verdict["winner"], "pair_id": pair.get("id")})
+
+        stats = pairwise_win_rate(judgements)
+        report = {
+            "mode": "suite_judge",
+            "timestamp": time.time(),
+            "summary": stats,
+            "judgements": judgements,
+            "passed": True,  # 胜率是观测指标，不做硬门禁
+        }
+        self._save_report(report, "judge")
+        self._print_suite_result(report)
+        return report
+
+    def _skipped_report(self, suite: str, reason: str) -> dict[str, Any]:
+        logger.warning(f"[{suite}] 套件跳过: {reason}")
+        return {
+            "mode": f"suite_{suite}",
+            "timestamp": time.time(),
+            "skipped": True,
+            "reason": reason,
+            "passed": True,  # 跳过 ≠ 失败，不挡 CI
+        }
+
+    def _print_suite_result(self, report: dict[str, Any]):
+        status = "PASSED" if report.get("passed") else "FAILED"
+        if report.get("skipped"):
+            status = "SKIPPED"
+        logger.info(f"\n[{report.get('mode')}] {status}: {report.get('summary', {})}")
+
     # ──────────────── 门禁检查 ────────────────
 
     def _check_gate(self, summary: dict, thresholds: dict) -> dict[str, Any]:
@@ -290,8 +484,14 @@ async def main():
     parser.add_argument(
         "--mode",
         choices=["regression", "gating", "smoke", "full"],
-        default="smoke",
-        help="评测模式",
+        default=None,
+        help="评测模式（RAGAS 组件/E2E）",
+    )
+    parser.add_argument(
+        "--suite",
+        choices=["bfcl", "gaia", "judge"],
+        default=None,
+        help="P4 套件：bfcl/gaia 离线免费；judge 调 LLM 仅 workflow_dispatch 手动触发",
     )
     parser.add_argument("--threshold", type=float, default=0.6, help="门禁阈值 (仅 gating 模式)")
     parser.add_argument("--max-e2e", type=int, default=10, help="E2E 最大用例数 (仅 full 模式)")
@@ -299,9 +499,17 @@ async def main():
     parser.add_argument("--output-dir", default="eval/results", help="输出目录")
 
     args = parser.parse_args()
+    if args.suite is None and args.mode is None:
+        args.mode = "smoke"  # 兼容旧行为
     runner = CIEvalRunner(output_dir=args.output_dir)
 
-    if args.mode == "regression":
+    if args.suite == "bfcl":
+        runner.run_bfcl()
+    elif args.suite == "gaia":
+        runner.run_gaia()
+    elif args.suite == "judge":
+        await runner.run_judge()
+    elif args.mode == "regression":
         await runner.run_regression()
     elif args.mode == "gating":
         await runner.run_gating(threshold=args.threshold)

@@ -1,13 +1,16 @@
-"""用户反馈接口 - 诊断结果的用户评价和反馈收集"""
+"""用户反馈接口 - 诊断结果的用户评价和反馈收集 + 负反馈回填金标集（P4）"""
 
 import json
 import os
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter
 from loguru import logger
 
+from app.eval.dataset_registry import bump_version, read_cases, save_dataset
 from app.eval.evaluator import AIOpsEvaluator
+from app.middleware.input_guard import input_guard
 from app.models.diagnosis_report import FeedbackRecord
 
 router = APIRouter()
@@ -31,13 +34,85 @@ def _save_feedbacks(feedbacks: list[dict]):
         json.dump(feedbacks, f, ensure_ascii=False, indent=2)
 
 
+def _normalize_case_key(query: str, root_cause: str) -> str:
+    """回填去重键：查询 + 根因的空白归一形式"""
+    return " ".join(f"{query}{root_cause}".split()).lower()
+
+
+def _clean_feedback_text(text: str, *, max_len: int = 500) -> str:
+    """入金标集前的净化：PII 掩码 + 剔除控制字符 + 截断
+
+    金标集随仓库分发且直接操纵回归门禁数字——外部输入必须先
+    收敛成「单行、有界、无个人可识别信息」的干净样本再落盘。
+    """
+    masked = input_guard.mask_pii((text or "").strip())
+    return "".join(ch for ch in masked if ch.isprintable())[:max_len]
+
+
+def backfill_negative_case(
+    record: FeedbackRecord, datasets_dir: str = "eval/datasets"
+) -> dict:
+    """负反馈自动回填金标集（去重 + 版本递增）
+
+    用户标记「诊断错误」且给出实际根因时，把该 case 追加进
+    negative_cases.json（origin=feedback），下次回归评测即覆盖此场景。
+
+    Returns:
+        {"backfilled": bool, "reason": str, "version": str|None}
+    """
+    query = _clean_feedback_text(record.comment)
+    root_cause = _clean_feedback_text(record.actual_root_cause)
+    if not query or not root_cause:
+        return {"backfilled": False, "reason": "缺少 query 或 actual_root_cause", "version": None}
+
+    dataset_path = Path(datasets_dir) / "negative_cases.json"
+    cases = read_cases(dataset_path)
+    current_version = _current_envelope_version(dataset_path)
+
+    key = _normalize_case_key(query, root_cause)
+    existing_keys = {
+        _normalize_case_key(str(c.get("query", "")), str(c.get("actual_root_cause", "")))
+        for c in cases
+    }
+    if key in existing_keys:
+        return {"backfilled": False, "reason": "duplicate", "version": current_version}
+
+    cases.append(
+        {
+            "id": f"FB_{record.session_id}_{record.message_index}",
+            "query": query,
+            "actual_root_cause": root_cause,
+            "required_evidence": [root_cause],
+            "category": "feedback",
+            "origin": "feedback",
+        }
+    )
+    new_version = bump_version(current_version or "")
+    manifest = save_dataset(dataset_path, cases, new_version)
+    return {"backfilled": True, "reason": "ok", "version": manifest.version}
+
+
+def _current_envelope_version(path: Path) -> str | None:
+    """读数据集信封版本号；legacy 裸列表返回 None"""
+    if not path.exists():
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = json.load(f)
+        version = raw.get("version") if isinstance(raw, dict) else None
+        return str(version) if isinstance(version, str) else None
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(f"读取数据集版本失败 {path}: {e}")
+    return None
+
+
 @router.post("/feedback")
 async def submit_feedback(record: FeedbackRecord):
     """提交用户反馈
 
     反馈类型：
     - positive: 诊断正确 → 强化该诊断路径置信度
-    - negative: 诊断错误 → 记录错误案例
+    - negative: 诊断错误 → 记录错误案例 + 自动去重回填金标集
     - comment: 补充信息 → 用户提供实际根因
 
     Args:
@@ -54,6 +129,19 @@ async def submit_feedback(record: FeedbackRecord):
     feedback_entry["timestamp"] = datetime.now().isoformat()
     feedbacks.append(feedback_entry)
     _save_feedbacks(feedbacks)
+
+    # 负反馈回填金标集（P4 反馈闭环）
+    backfill_info: dict = {"backfilled": False, "reason": "not_negative", "version": None}
+    if record.feedback_type == "negative":
+        try:
+            backfill_info = backfill_negative_case(record)
+        except Exception as e:  # noqa: BLE001 - 回填失败不影响反馈主流程
+            backfill_info = {"backfilled": False, "reason": f"error: {e}", "version": None}
+            logger.warning(f"负反馈回填金标集失败: {e}")
+        if backfill_info["backfilled"]:
+            logger.info(
+                f"负反馈已回填金标集: version={backfill_info['version']}"
+            )
 
     # 如果用户提供了实际根因，学习到知识图谱
     kg_updated = False
@@ -81,6 +169,7 @@ async def submit_feedback(record: FeedbackRecord):
             "message": "反馈已记录",
             "kg_updated": kg_updated,
             "total_feedbacks": len(feedbacks),
+            "dataset_backfill": backfill_info,
         },
     }
 

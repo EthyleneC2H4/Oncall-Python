@@ -73,7 +73,12 @@ async def executor(state: PlanExecuteState) -> dict[str, Any]:
         if matched is None:
             raise ValueError(f"步骤绑定的工具 '{tool_name}' 不在可用工具池中")
 
-        result = await guarded_call(matched, args)
+        # 观测关联 ID 随痕迹落盘（缺省空串——BFCL 会话过滤依赖非空 session_id）
+        result = await guarded_call(
+            matched, args,
+            request_id=str(state.get("request_id", "")),
+            session_id=str(state.get("session_id", "")),
+        )
         if result.needs_confirmation:
             return (
                 f"[待人工确认] 该步骤触发高风险操作确认门（action_id={result.action_id}）。"

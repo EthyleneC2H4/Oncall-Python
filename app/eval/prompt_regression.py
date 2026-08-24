@@ -103,14 +103,15 @@ class PromptRegressionRunner:
         return report
 
     def _load_cases(self) -> list[dict]:
-        """加载评测用例"""
+        """加载评测用例（经 dataset_registry 兼容版本信封）"""
+        from app.eval.dataset_registry import read_cases
+
         dataset_dir = Path("eval/datasets")
         cases = []
         for filename in ["diagnostic_cases.json", "negative_cases.json"]:
             filepath = dataset_dir / filename
             if filepath.exists():
-                with open(filepath, encoding="utf-8") as f:
-                    cases.extend(json.load(f))
+                cases.extend(read_cases(filepath))
         return cases
 
     async def _evaluate_case_diff(self, test_case: dict) -> dict:

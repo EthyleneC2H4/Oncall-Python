@@ -26,6 +26,17 @@ def _patch_project_root(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _disable_tool_trace(monkeypatch):
+    """默认关闭 guard 的工具痕迹落盘：测试不写仓库内 data/traces/。
+
+    专测痕迹行为的用例自行构造 ToolTraceSink(tmp_path) 或重新开启。
+    """
+    from app.config import config
+
+    monkeypatch.setattr(config, "tool_trace_enabled", False)
+
+
+@pytest.fixture(autouse=True)
 def _isolated_memory_singleton(tmp_path, monkeypatch):
     """默认隔离长期记忆单例：临时库路径 + 确定性假嵌入器
 

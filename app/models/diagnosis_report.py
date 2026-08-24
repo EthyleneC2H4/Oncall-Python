@@ -104,10 +104,14 @@ class DiagnosisEvent(BaseModel):
 
 
 class FeedbackRecord(BaseModel):
-    """用户反馈记录"""
+    """用户反馈记录
 
-    session_id: str = Field(description="会话ID")
+    长度上限：负反馈会回填金标集与知识图谱（外部可达的持久化面），
+    无界自由文本等于把 DoS 与注入载荷写进仓库资产。
+    """
+
+    session_id: str = Field(max_length=128, description="会话ID")
     message_index: int = Field(description="消息索引")
-    feedback_type: str = Field(description="反馈类型: positive | negative | comment")
-    comment: str = Field(default="", description="用户补充说明")
-    actual_root_cause: str = Field(default="", description="用户提供的实际根因")
+    feedback_type: str = Field(max_length=16, description="反馈类型: positive | negative | comment")
+    comment: str = Field(default="", max_length=2000, description="用户补充说明")
+    actual_root_cause: str = Field(default="", max_length=500, description="用户提供的实际根因")

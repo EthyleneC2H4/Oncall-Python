@@ -4,7 +4,7 @@
 """
 
 import operator
-from typing import Annotated, TypedDict
+from typing import Annotated, NotRequired, TypedDict
 
 
 class PlanExecuteState(TypedDict):
@@ -42,3 +42,8 @@ class PlanExecuteState(TypedDict):
 
     # 当前降级等级
     degradation_level: str
+
+    # 观测关联 ID（P4，NotRequired：旧构造点无需改动）——
+    # executor 透传给 guarded_call 落盘工具痕迹，BFCL 回放按会话过滤全靠它
+    session_id: NotRequired[str]
+    request_id: NotRequired[str]
