@@ -50,8 +50,6 @@ jobs:
   unit-tests:
     name: Unit Tests (pytest)
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # 临时诊断：失败日志寄回 ci-debug 分支（定位后移除）
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -62,26 +60,9 @@ jobs:
       # 失败的 pytest 也显示绿色（门禁形同虚设）
       - name: Run unit tests
         run: |
-          set -o pipefail
           uv run pytest tests/ \
             -v --tb=short --cov=app --cov-report=term-missing --cov-report=html \
-            --timeout=120 2>&1 | tee /tmp/pytest.log
-      # 本地无法访问 github.com 网页日志，失败时把尾部日志提交到 ci-debug 分支
-      - name: Export failure tail to ci-debug branch (temporary)
-        if: failure()
-        env:
-          TOKEN: ${{ github.token }}
-        run: |
-          tail -n 300 /tmp/pytest.log > ci_failure_tail.txt
-          git config user.email "ci-debug@noreply.github.com"
-          git config user.name "ci-debug"
-          git remote add tok "https://x-access-token:${TOKEN}@github.com/${{ github.repository }}.git"
-          git checkout -q --detach
-          git branch -D ci-debug 2>/dev/null || true
-          git checkout -q -b ci-debug
-          git add ci_failure_tail.txt
-          git commit -q -m "ci-debug: unit-tests failure tail (${{ github.sha }})"
-          git push -q --force tok ci-debug
+            --timeout=120
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v4

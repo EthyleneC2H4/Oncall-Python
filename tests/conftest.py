@@ -7,10 +7,16 @@
 """
 
 import json
+import os
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+# CI 干净检出没有 .env：Settings() 在收集期导入即实例化（app/config.py:127），
+# 下方 fixture 的 setenv 来不及生效，OpenAI 兼容客户端构造会因缺 key 抛异常。
+# 在导入任何 app 模块前注入占位 key——真实 LLM 调用一律被 mock，不会发请求。
+os.environ.setdefault("OPENROUTER_API_KEY", "test-api-key-for-testing")
 
 # ──────────────── 路径与环境 ────────────────
 
