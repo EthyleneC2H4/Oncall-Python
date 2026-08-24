@@ -17,7 +17,7 @@
 - **Token 预算上下文工程** — 类型化 Packet（记忆 / 图谱 / 文档 / 历史）按类别配额装配，溢出再分配，超限走 weak-LLM roll-up 压缩，硬预算封顶。
 - **结构化规划与工具治理** — 计划是强类型 `PlanStep` / `StructuredPlan`，容错解析器永不抛异常；所有工具调用经过唯一 guard 管道（权限 → 参数校验 → 执行 → 审计），高风险动作必须人工审批，审批执行具备 exactly-once 语义。
 - **Prompt 即基础设施** — 可组合提示词块（persona / rules / few-shot）支持热加载；请求头驱动的 A/B 变体（`X-Prompt-Variant`），按会话归因进 cost tracker，配套 A/B 回归评测器。
-- **三层评估** — BFCL 式工具调用回放、GAIA 式分级任务匹配、LLM-as-judge（pairwise 胜率 + Cohen's κ），外加 CI 组件级回归门禁；用户负反馈自动回填负例数据集。
+- **三层评估** — BFCL 式工具调用回放、GAIA 式分级任务匹配、LLM-as-judge（pairwise 胜率 + Cohen's κ），外加组件级回归套件（门禁未过以非零退出码上报）；用户负反馈自动回填负例数据集。
 
 ## 架构
 
@@ -214,6 +214,8 @@ python -m app.eval.prompt_regression \
 ```
 
 评估层次：**组件级**（路由准确率、上下文召回 / 精度、KG 覆盖率）、**任务级**（GAIA 式 exact/partial/wrong 证据匹配）、**工具级**（BFCL 式类型敏感参数匹配，跑在审计 trace 上）、**裁判级**（faithfulness / relevancy 1–5 分、pairwise 胜率、Cohen's κ）。金标数据集带 version + SHA-256 信封；注册表拒绝无版本文件。注意：LLM 路由类指标即使 temperature=0 在多次运行间也不确定——单次波动 ±20pp 以内视为噪声。
+
+CI 如实说明：GitHub 托管 runner 没有 Milvus / 本地模型全栈，评测作业在那里走降级阶梯，指标仅作信息参考（报告发布到 job summary）而非门禁。权威门禁是 `ci_runner` 在本地全栈或自托管 runner 上的运行——门禁未过即非零退出码。
 
 ## 项目结构
 

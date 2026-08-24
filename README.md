@@ -17,7 +17,7 @@
 - **Token-budget context engineering** — typed packets (memory / KG / docs / history) with per-kind quotas, spillover redistribution, and weak-LLM roll-up compression under a hard token budget.
 - **Structured planning & tool governance** — plans are typed (`PlanStep` / `StructuredPlan`) with a fault-tolerant parser that never raises; every tool call passes through a single guard pipeline (permission → schema validation → execution → audit), and high-risk actions require human approval via an API with exactly-once execution semantics.
 - **Prompt engineering as infrastructure** — composable prompt blocks (persona / rules / few-shot) with hot reload, header-driven A/B variants (`X-Prompt-Variant`) attributed per session in the cost tracker, and an A/B regression runner.
-- **Three-layer evaluation** — BFCL-style tool-call replay, GAIA-style graded task matching, LLM-as-judge (pairwise win rate + Cohen's κ), plus a component-level regression gate in CI; user feedback auto-backfills the negative-case dataset.
+- **Three-layer evaluation** — BFCL-style tool-call replay, GAIA-style graded task matching, LLM-as-judge (pairwise win rate + Cohen's κ), plus a component-level regression runner whose gates fail loudly via non-zero exit; user feedback auto-backfills the negative-case dataset.
 
 ## Architecture
 
@@ -214,6 +214,8 @@ python -m app.eval.prompt_regression \
 ```
 
 Layers: **component** (routing accuracy, context recall/precision, KG coverage), **task** (GAIA-style exact/partial/wrong evidence matching), **tool** (BFCL-style type-sensitive argument matching over audited traces), **judge** (faithfulness/relevancy 1–5, pairwise win rate, Cohen's κ). Gold datasets carry a version + SHA-256 envelope; unversioned files are rejected by the registry. Note that LLM-routed metrics are nondeterministic across runs even at temperature 0 — treat single-run deltas within ~±20pp as noise.
+
+CI honesty note: GitHub-hosted runners carry no Milvus / local-model stack, so the eval jobs there run through the degradation ladder and are informational only — reports are published to the job summary instead of gating. The authoritative gate is `ci_runner` on a full local stack or a self-hosted runner, where a failed gate exits non-zero.
 
 ## Project layout
 

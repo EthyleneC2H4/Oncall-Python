@@ -502,22 +502,28 @@ async def main():
         args.mode = "smoke"  # 兼容旧行为
     runner = CIEvalRunner(output_dir=args.output_dir)
 
+    report: dict[str, Any] | None = None
     if args.suite == "bfcl":
-        runner.run_bfcl()
+        report = runner.run_bfcl()
     elif args.suite == "gaia":
-        runner.run_gaia()
+        report = runner.run_gaia()
     elif args.suite == "judge":
-        await runner.run_judge()
+        report = await runner.run_judge()
     elif args.mode == "regression":
-        await runner.run_regression()
+        report = await runner.run_regression()
     elif args.mode == "gating":
-        await runner.run_gating(threshold=args.threshold)
+        report = await runner.run_gating(threshold=args.threshold)
     elif args.mode == "smoke":
-        await runner.run_smoke()
+        report = await runner.run_smoke()
     elif args.mode == "full":
-        await runner.run_full(max_e2e_cases=args.max_e2e, metrics=args.metrics)
+        report = await runner.run_full(max_e2e_cases=args.max_e2e, metrics=args.metrics)
 
     logger.info("CI 评测完成")
+    # 门禁语义落地：此前报告里 passed=False 但进程仍 exit 0，门禁形同虚设。
+    # 优雅跳过（skipped）不算失败；真实运行且门禁未过 → 非零退出码上报
+    if report is not None and not report.get("skipped") and report.get("passed") is False:
+        logger.error("评测门禁未通过：以非零退出码上报")
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
