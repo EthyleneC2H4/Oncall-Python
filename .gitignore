@@ -87,3 +87,6 @@ uv.lock
 
 # Knowledge graph data
 kg_data.json
+
+# Eval run artifacts (timestamped reports; datasets stay tracked)
+eval/results/

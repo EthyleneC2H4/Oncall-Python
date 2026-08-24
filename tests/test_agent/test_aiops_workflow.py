@@ -88,7 +88,8 @@ class TestPlanner:
 
         with (
             patch("app.agent.aiops.planner.query_router") as mock_router,
-            patch("app.agent.aiops.planner.retrieve_knowledge"),
+            # P5 后 planner 不再持有工具符号（清单来自 runtime.toolsets），
+            # 工具仅进提示词描述、从不被调用，无需打桩
             patch("app.agent.aiops.planner.LLMFactory") as mock_llm,
             patch(
                 "app.agent.aiops.planner.get_mcp_tools", new_callable=AsyncMock

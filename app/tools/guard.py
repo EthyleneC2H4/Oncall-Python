@@ -267,19 +267,9 @@ def _audit(
 
 async def _find_tool(name: str) -> Any | None:
     """在本地与 MCP 工具池中按名查找（补执行路径用）"""
-    from app.tools import (
-        get_current_time,
-        predict_alert_cascade,
-        query_alert_graph,
-        retrieve_knowledge,
-    )
+    from app.agent.runtime.toolsets import local_tool_map
 
-    local = {
-        get_current_time.name: get_current_time,
-        retrieve_knowledge.name: retrieve_knowledge,
-        query_alert_graph.name: query_alert_graph,
-        predict_alert_cascade.name: predict_alert_cascade,
-    }
+    local = local_tool_map()
     if name in local:
         return local[name]
     try:

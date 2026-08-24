@@ -8,9 +8,9 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from loguru import logger
 
 from app.agent.mcp_client import get_mcp_tools
+from app.agent.runtime.toolsets import knowledge_toolkit
 from app.config import config
 from app.core.llm_factory import LLMFactory
-from app.tools import predict_alert_cascade, query_alert_graph, retrieve_knowledge
 from app.tools.filters import tools_for_role
 
 
@@ -179,8 +179,7 @@ class KnowledgeRetrieverAgent(BaseSpecialistAgent):
     async def analyze(self, alert_input: str) -> str:
         try:
             # 本地知识工具按角色过滤（与 MCP 工具同一事实源）
-            all_local = [query_alert_graph, predict_alert_cascade, retrieve_knowledge]
-            local_tools = tools_for_role(all_local, self.name)
+            local_tools = tools_for_role(knowledge_toolkit(), self.name)
             llm_with_tools = self.llm.bind_tools(local_tools)
 
             messages = [

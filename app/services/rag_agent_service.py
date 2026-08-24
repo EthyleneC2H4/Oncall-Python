@@ -41,11 +41,15 @@ class RagAgentService:
             f"RAG Agent 服务初始化完成 (OpenRouter), model={self.model_name}, streaming={streaming}"
         )
 
-    def _build_system_prompt(self) -> str:
+    def _build_system_prompt(self, variant: str | None = None) -> str:
         """
-        构建结构化系统提示词
+        构建结构化系统提示词（P5：块组合 + AB 变体）
 
-        优先从 Prompt 版本化管理器加载，fallback 到硬编码。
+        优先从 Prompt 版本化管理器组合渲染（persona/rules 块 + 正文），
+        fallback 到硬编码。
+
+        Args:
+            variant: AB 变体名（X-Prompt-Variant 请求头）；未登记名回退基线
 
         Returns:
             str: 系统提示词
@@ -55,8 +59,15 @@ class RagAgentService:
 
             template = prompt_manager.get("system_prompt")
             if template:
-                logger.debug(f"加载 Prompt 模板: system_prompt v{template.version}")
-                return template.content.strip()
+                composed = prompt_manager.render_composed(
+                    "system_prompt", variant=variant
+                )
+                effective = prompt_manager.effective_variant("system_prompt", variant)
+                logger.debug(
+                    f"加载 Prompt 模板: system_prompt v{template.version}"
+                    + (f" (variant={effective})" if effective else "")
+                )
+                return composed
         except Exception as e:
             logger.debug(f"Prompt 模板加载失败，使用内置: {e}")
 
@@ -89,10 +100,27 @@ class RagAgentService:
             保持友好、专业的语气，回答简洁明了，重点突出。
         """).strip()
 
+    def _resolve_prompt_variant(self, requested: str | None) -> str:
+        """解析实际生效的 Prompt 变体（"" = 基线）；解析失败按基线处理
+
+        AB 归因与 SSE complete 字段均由 runtime 层按实际使用的图下发
+        （评审修复：此处不再预标记，未生效的变体不会被计入分组）
+        """
+        if not requested:
+            return ""
+        try:
+            from app.core.prompt_manager import prompt_manager
+
+            return prompt_manager.effective_variant("system_prompt", requested)
+        except Exception as e:  # noqa: BLE001 - 变体归因失败不影响主流程
+            logger.debug(f"Prompt 变体解析失败，按基线处理: {e}")
+            return ""
+
     async def query(
         self,
         question: str,
         session_id: str,
+        prompt_variant: str | None = None,
     ) -> str:
         """
         非流式处理用户问题（一次性返回完整答案）
@@ -100,15 +128,22 @@ class RagAgentService:
         Args:
             question: 用户问题
             session_id: 会话ID（作为 thread_id）
+            prompt_variant: AB 变体名（来自 X-Prompt-Variant 请求头）
 
         Returns:
             str: 完整答案
         """
         try:
-            logger.info(f"[会话 {session_id}] RAG Agent 收到查询（非流式）: {question}")
+            effective_variant = self._resolve_prompt_variant(prompt_variant)
+            logger.info(
+                f"[会话 {session_id}] RAG Agent 收到查询（非流式）: {question}"
+                + (f" (variant={effective_variant})" if effective_variant else "")
+            )
 
             answer_parts: list[str] = []
-            async for event in self.runtime.run(question, session_id=session_id):
+            async for event in self.runtime.run(
+                question, session_id=session_id, prompt_variant=effective_variant or None
+            ):
                 if event.type is EventType.TOKEN:
                     answer_parts.append(str(event.payload.get("text", "")))
                 elif event.type is EventType.COMPLETE:
@@ -129,6 +164,7 @@ class RagAgentService:
         self,
         question: str,
         session_id: str,
+        prompt_variant: str | None = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
         """
         流式处理用户问题（逐步返回答案片段）
@@ -136,20 +172,27 @@ class RagAgentService:
         旧 SSE chunk 契约（/api/chat_stream 消费）：
             - {"type": "content", "data": 文本块, "node": 节点}
             - {"type": "tool_call", "data": {...}}   ← P1.1 新增（只增不改）
-            - {"type": "complete"}
+            - {"type": "complete", "prompt_variant": "..."}  ← P5 新增（只增不改）
             - {"type": "error", "data": 错误信息}
 
         Args:
             question: 用户问题
             session_id: 会话ID（作为 thread_id）
+            prompt_variant: AB 变体名（来自 X-Prompt-Variant 请求头）
 
         Yields:
             Dict[str, Any]: 包含流式数据的字典
         """
         try:
-            logger.info(f"[会话 {session_id}] RAG Agent 收到查询（流式）: {question}")
+            effective_variant = self._resolve_prompt_variant(prompt_variant)
+            logger.info(
+                f"[会话 {session_id}] RAG Agent 收到查询（流式）: {question}"
+                + (f" (variant={effective_variant})" if effective_variant else "")
+            )
 
-            async for event in self.runtime.run(question, session_id=session_id):
+            async for event in self.runtime.run(
+                question, session_id=session_id, prompt_variant=effective_variant or None
+            ):
                 if event.type is EventType.TOKEN:
                     yield {
                         "type": "content",
@@ -176,7 +219,12 @@ class RagAgentService:
                     }
                 elif event.type is EventType.COMPLETE:
                     logger.info(f"[会话 {session_id}] RAG Agent 查询完成（流式）")
-                    yield {"type": "complete"}
+                    complete: dict[str, Any] = {"type": "complete"}
+                    # runtime 按实际生效的图回传变体名；基线运行无该字段（只增不改）
+                    used_variant = str(event.payload.get("prompt_variant") or "")
+                    if used_variant:
+                        complete["prompt_variant"] = used_variant
+                    yield complete
                 elif event.type is EventType.ERROR:
                     message = str(event.payload.get("message", ""))
                     yield {"type": "error", "data": message}

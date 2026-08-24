@@ -23,6 +23,7 @@ from app.agent.aiops import PlanExecuteState, executor, planner, replanner
 from app.agent.runtime.base import AgentRuntime, default_registry
 from app.agent.runtime.events import AgentEvent, AgentEventEmitter, EventType
 from app.config import config
+from app.services.session_store import SessionStore
 
 # 节点名称常量
 NODE_PLANNER = "planner"
@@ -149,6 +150,11 @@ class PlanExecuteRuntime(AgentRuntime):
         default_registry.register(self)
         logger.info("PlanExecuteRuntime 初始化完成")
 
+    @property
+    def _store(self) -> SessionStore:
+        """会话读写视图：每次从当前 checkpointer 派生（测试可整体替换）"""
+        return SessionStore(self.checkpointer)
+
     def _build_graph(self):
         """构建 Plan-Execute-Replan 工作流"""
         logger.info("构建工作流图...")
@@ -203,10 +209,7 @@ class PlanExecuteRuntime(AgentRuntime):
             # initial_state 的空列表「追加」而非覆盖，导致同 session 第二个
             # 任务带着旧历史跑（误触发强制 respond/循环检测）。每次 run 前
             # 清掉该会话线程，任务级状态只属于本次运行。
-            try:
-                self.checkpointer.delete_thread(session_id)
-            except Exception as e:  # noqa: BLE001 - 清理失败不阻断执行
-                logger.warning(f"清空会话检查点失败（忽略）: {e}")
+            self._store.clear_best_effort(session_id)
 
             initial_state: PlanExecuteState = {
                 "input": task,
@@ -288,9 +291,4 @@ class PlanExecuteRuntime(AgentRuntime):
 
     def reset(self, session_id: str) -> bool:
         """清空指定会话的工作流检查点"""
-        try:
-            self.checkpointer.delete_thread(session_id)
-            return True
-        except Exception as e:
-            logger.error(f"清空工作流会话失败: {session_id}, 错误: {e}")
-            return False
+        return self._store.clear(session_id)

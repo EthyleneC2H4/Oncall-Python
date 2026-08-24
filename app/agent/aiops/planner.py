@@ -12,6 +12,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from app.agent.mcp_client import get_mcp_tools
+from app.agent.runtime.toolsets import local_toolkit
 from app.config import config
 from app.core.llm_factory import LLMFactory
 from app.models.plan import StructuredPlan, looks_like_plan, parse_plan
@@ -19,10 +20,6 @@ from app.services.context_assembler import context_assembler
 from app.services.knowledge_graph_service import knowledge_graph_service
 from app.services.query_router import query_router
 from app.tools import (
-    get_current_time,
-    predict_alert_cascade,
-    query_alert_graph,
-    retrieve_knowledge,
     retrieve_with_hyde,
     retrieve_with_rewrite_and_rerank,
 )
@@ -185,13 +182,8 @@ async def planner(state: PlanExecuteState) -> dict[str, Any]:
                 logger.warning(f"知识图谱查询失败: {e}")
 
         # 步骤2: 获取可用工具列表
-        # 获取本地工具
-        local_tools = [
-            get_current_time,
-            retrieve_knowledge,
-            query_alert_graph,
-            predict_alert_cascade,
-        ]
+        # 获取本地工具（清单单一事实源见 runtime.toolsets）
+        local_tools = local_toolkit()
 
         # 获取 MCP 工具（短 TTL 缓存，一次运行内复用）
         mcp_tools = await get_mcp_tools()

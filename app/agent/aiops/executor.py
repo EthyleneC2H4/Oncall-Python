@@ -11,10 +11,10 @@ from langgraph.prebuilt import ToolNode
 from loguru import logger
 
 from app.agent.mcp_client import get_mcp_tools
+from app.agent.runtime.toolsets import local_toolkit
 from app.config import config
 from app.core.llm_factory import LLMFactory
 from app.harness.agent_rules import AGENT_RULES
-from app.tools import get_current_time, predict_alert_cascade, query_alert_graph, retrieve_knowledge
 from app.tools.filters import tools_executable_without_approval
 
 from .state import PlanExecuteState
@@ -59,12 +59,7 @@ async def executor(state: PlanExecuteState) -> dict[str, Any]:
         """P3 直连路径：经 guard 执行绑定工具，不走 LLM 决策"""
         from app.tools.guard import guarded_call
 
-        local_tools = [
-            get_current_time,
-            retrieve_knowledge,
-            query_alert_graph,
-            predict_alert_cascade,
-        ]
+        local_tools = local_toolkit()
         mcp_tools = await get_mcp_tools()
         matched = next(
             (t for t in [*local_tools, *mcp_tools] if getattr(t, "name", "") == tool_name),
@@ -90,13 +85,8 @@ async def executor(state: PlanExecuteState) -> dict[str, Any]:
 
     async def _execute_react():
         """回退路径：mini-ReAct 由 LLM 自主选工具"""
-        # 获取本地工具（含知识图谱工具）
-        local_tools = [
-            get_current_time,
-            retrieve_knowledge,
-            query_alert_graph,
-            predict_alert_cascade,
-        ]
+        # 获取本地工具（含知识图谱工具；清单单一事实源见 runtime.toolsets）
+        local_tools = local_toolkit()
 
         # 获取 MCP 工具（短 TTL 缓存，一次运行内复用）
         mcp_tools = await get_mcp_tools()

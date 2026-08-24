@@ -4,8 +4,9 @@
 """
 
 import json
+import re
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from loguru import logger
 from sse_starlette.sse import EventSourceResponse
 
@@ -15,9 +16,27 @@ from app.services.rag_agent_service import rag_agent_service
 
 router = APIRouter()
 
+# P5 AB：变体名白名单（请求头 X-Prompt-Variant），防注入与超长
+_VARIANT_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
+
+
+def _sanitize_prompt_variant(raw: str | None) -> str | None:
+    """清洗 X-Prompt-Variant 请求头；不合法值静默按基线处理（不报错打断对话）
+
+    变体名约定全小写（YAML variants 键与 cost_tracker 分组均按小写登记），
+    这里统一归一小写，避免 "Concise" 与 "concise" 被当成两个分组。
+    """
+    if not raw:
+        return None
+    value = raw.strip().lower()
+    return value if _VARIANT_RE.match(value) else None
+
 
 @router.post("/chat")
-async def chat(request: ChatRequest):
+async def chat(
+    request: ChatRequest,
+    x_prompt_variant: str | None = Header(default=None, alias="X-Prompt-Variant"),
+):
     """快速对话接口
     {
         "code": 200,
@@ -31,13 +50,18 @@ async def chat(request: ChatRequest):
 
     Args:
         request: 对话请求
+        x_prompt_variant: Prompt AB 变体名（可选请求头）
 
     Returns:
         统一格式的对话响应
     """
     try:
         logger.info(f"[会话 {request.id}] 收到快速对话请求: {request.question}")
-        answer = await rag_agent_service.query(request.question, session_id=request.id)
+        answer = await rag_agent_service.query(
+            request.question,
+            session_id=request.id,
+            prompt_variant=_sanitize_prompt_variant(x_prompt_variant),
+        )
 
         logger.info(f"[会话 {request.id}] 快速对话完成")
 
@@ -57,7 +81,10 @@ async def chat(request: ChatRequest):
 
 
 @router.post("/chat_stream")
-async def chat_stream(request: ChatRequest):
+async def chat_stream(
+    request: ChatRequest,
+    x_prompt_variant: str | None = Header(default=None, alias="X-Prompt-Variant"),
+):
     """流式对话接口（基于 RAG Agent，SSE）
 
     返回 SSE 格式，data 字段为 JSON：
@@ -73,19 +100,23 @@ async def chat_stream(request: ChatRequest):
     完成事件:
     event: message
     data: {"type":"done","data":{"answer":"完整答案","tool_calls":[...]}}
+          （P5：变体实际生效时 done.data 为 {"prompt_variant": "生效变体"}；
+          基线运行（含未登记/渲染失败回退）保持原形状不变）
 
     Args:
         request: 对话请求
+        x_prompt_variant: Prompt AB 变体名（可选请求头）
 
     Returns:
         SSE 事件流
     """
     logger.info(f"[会话 {request.id}] 收到流式对话请求: {request.question}")
+    prompt_variant = _sanitize_prompt_variant(x_prompt_variant)
 
     async def event_generator():
         try:
             async for chunk in rag_agent_service.query_stream(
-                request.question, session_id=request.id
+                request.question, session_id=request.id, prompt_variant=prompt_variant
             ):
                 chunk_type = chunk.get("type", "unknown")
                 chunk_data = chunk.get("data", None)
@@ -129,11 +160,16 @@ async def chat_stream(request: ChatRequest):
                         ),
                     }
                 elif chunk_type == "complete":
-                    # 发送完成信号
+                    # 发送完成信号；P5：变体运行时附带生效变体名（只增不改）
+                    done_data = (
+                        {"prompt_variant": chunk["prompt_variant"]}
+                        if chunk.get("prompt_variant")
+                        else chunk_data
+                    )
                     yield {
                         "event": "message",
                         "data": json.dumps(
-                            {"type": "done", "data": chunk_data}, ensure_ascii=False
+                            {"type": "done", "data": done_data}, ensure_ascii=False
                         ),
                     }
                 elif chunk_type == "error":

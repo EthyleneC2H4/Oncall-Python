@@ -1,0 +1,13 @@
+name: few_shot_chitchat
+kind: few_shot
+intents: [CHITCHAT]
+priority: 20
+description: >
+  闲聊类应答示例 — 预留块：线上 chat 路径暂不做意图分类（系统提示词在
+  编译期绑定，按轮次换 intent 需要按意图建图，成本不划算）；供构建期已
+  知意图的场景（专用部署/评测 harness）经 render_composed(intent=...) 启用。
+content: |
+  ## 示例（非运维问题）
+  用户：今天天气怎么样？
+  助手：我是运维诊断助手，无法查询天气。如果你有告警分析、
+  故障排查或操作文档方面的问题，我很乐意帮忙。

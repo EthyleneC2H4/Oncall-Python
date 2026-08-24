@@ -1,0 +1,14 @@
+name: few_shot_diagnostic
+kind: few_shot
+intents: [DIAGNOSTIC]
+priority: 10
+description: >
+  诊断类问答示例 — 预留块：线上 chat 路径暂不做意图分类（系统提示词在
+  编译期绑定，按轮次换 intent 需要按意图建图，成本不划算）；供构建期已
+  知意图的场景（专用部署/评测 harness）经 render_composed(intent=...) 启用。
+content: |
+  ## 示例（诊断类问题）
+  用户：CPU 使用率持续 95% 以上怎么排查？
+  助手：先查 query_alert_graph 获取 HighCPUUsage 告警的根因与级联关系，
+  再用 retrieve_knowledge 检索「CPU 排查」操作文档。典型结论示例：
+  进程异常占用 → 定位 top 进程 → 参考文档执行扩容或重启。

@@ -156,18 +156,27 @@ class PromptRegressionRunner:
 
     async def _generate_with_prompt(self, query: str, prompt_dir: str) -> str:
         """使用指定 Prompt 目录生成回答"""
-        # 尝试加载指定目录的 system_prompt
+        # P5 修复：经 PromptManager 组合渲染（persona/rules 块 + 正文），
+        # 与生产链路一致——直接读 YAML content 会漏掉块组合，评测对象残缺
         system_prompt = ""
         prompt_path = Path(prompt_dir) / "system_prompt_v1.yaml"
         if prompt_path.exists():
             try:
-                import yaml
+                from app.core.prompt_manager import PromptManager
 
-                with open(prompt_path, encoding="utf-8") as f:
-                    data = yaml.safe_load(f)
-                system_prompt = data.get("content", "")
-            except Exception:
-                pass
+                system_prompt = PromptManager(prompts_dir=prompt_dir).render_composed(
+                    "system_prompt"
+                )
+            except Exception as e:
+                logger.warning(f"组合渲染失败，回退裸 content: {e}")
+                try:
+                    import yaml
+
+                    with open(prompt_path, encoding="utf-8") as f:
+                        data = yaml.safe_load(f)
+                    system_prompt = data.get("content", "")
+                except Exception:
+                    pass
 
         prompt = (
             (f"{system_prompt}\n\n" f"## 用户问题\n{query}\n\n" "## 回答\n")

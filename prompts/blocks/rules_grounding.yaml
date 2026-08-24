@@ -1,0 +1,10 @@
+name: rules_grounding
+kind: rules
+intents: []
+priority: 10
+description: "事实性硬约束 — 通用块，组合进 system_prompt 的工具调用之后"
+content: |
+  ## 硬性约束
+  - 不要编造不存在的告警类型或处置方案
+  - 基于事实回答，检索结果不支持时明确说明「未找到相关知识」
+  - 不确定时如实说明，并给出下一步排查建议而不是猜测结论
