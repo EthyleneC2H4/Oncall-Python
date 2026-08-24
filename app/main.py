@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
-from app.api import aiops, chat, feedback, file, health, kg, multi_diag
+from app.api import aiops, chat, feedback, file, health, kg, memory, multi_diag
 from app.config import config
 from app.core.circuit_breaker import BREAKER_MILVUS, get_breaker
 from app.core.health_registry import health_registry
@@ -68,6 +68,20 @@ async def lifespan(app: FastAPI):
         health_registry.mark_down("milvus")
         get_breaker(BREAKER_MILVUS).record_failure()
 
+    # 长期记忆服务：disabled 时不注册健康组件（避免 /health 常驻 down 的噪音）；
+    # enabled 但启动失败才标 down（非致命，降级为无记忆模式继续服务）
+    try:
+        from app.services.memory import memory_service
+
+        if memory_service.enabled:
+            health_registry.register("memory")
+            ready = await memory_service.start()
+            if not ready:
+                health_registry.mark_down("memory")
+    except Exception as e:
+        logger.warning(f"⚠️ 长期记忆服务启动失败，将以无记忆模式运行: {e}")
+        health_registry.mark_down("memory")
+
     # 启动后台健康探针
     await health_registry.start_probes(interval=config.health_probe_interval)
 
@@ -77,6 +91,12 @@ async def lifespan(app: FastAPI):
 
     # 关闭时执行
     await health_registry.stop_probes()
+    try:
+        from app.services.memory import memory_service
+
+        await memory_service.stop()
+    except Exception as e:
+        logger.warning(f"⚠️ 长期记忆服务关闭异常: {e}")
     logger.info("🔌 正在关闭 Milvus 连接...")
     milvus_manager.close()
     logger.info(f"👋 {config.app_name} 关闭")
@@ -119,6 +139,7 @@ app.include_router(aiops.router, prefix="/api", tags=["AIOps智能运维"])
 app.include_router(kg.router, prefix="/api", tags=["知识图谱"])
 app.include_router(multi_diag.router, prefix="/api", tags=["多Agent诊断"])
 app.include_router(feedback.router, prefix="/api", tags=["反馈与评测"])
+app.include_router(memory.router, prefix="/api", tags=["长期记忆"])
 
 # 挂载静态文件
 static_dir = "static"

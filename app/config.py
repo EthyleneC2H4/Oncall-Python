@@ -8,6 +8,7 @@ LLM 接入：OpenRouter（OpenAI 兼容模式）
 
 from typing import Any
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -71,6 +72,25 @@ class Settings(BaseSettings):
     health_probe_interval: float = 30.0  # 健康探针间隔（秒）
     step_timeout_seconds: float = 60.0  # Agent 单步超时（秒）
     workflow_timeout_seconds: float = 180.0  # Agent 整体工作流超时（秒）
+
+    # 长期记忆配置（P2）
+    # 数值项用 Field 约束边界：env 误配（如 nan/负值）在启动即失败，
+    # 而非静默毒化打分（λ=nan 会让全部得分变 NaN、召回永久返回空）
+    memory_enabled: bool = True  # 总开关；关闭时所有记忆读写为无副作用空操作
+    memory_db_path: str = "data/memory.db"  # sqlite 存储路径（WAL 模式）
+    memory_recall_k: int = Field(default=5, ge=1)  # 单次召回上限
+    memory_min_importance: float = Field(default=0.2, ge=0.0, le=1.0)  # 召回的重要性下限
+    memory_decay_lambda: float = Field(default=0.05, ge=0.0)  # 新近度指数衰减率 λ（按天）
+    memory_weight_relevance: float = Field(default=0.6, ge=0.0, le=1.0)  # 权重：向量相关性
+    memory_weight_importance: float = Field(default=0.25, ge=0.0, le=1.0)  # 权重：重要性
+    memory_weight_recency: float = Field(default=0.15, ge=0.0, le=1.0)  # 权重：新近度
+    memory_consolidate_threshold: float = Field(
+        default=0.85, ge=0.0, le=1.0
+    )  # 情景→语义巩固的余弦相似度阈值
+
+    # 上下文引擎配置（P2）
+    context_token_budget: int = 6000  # 注入 LLM 的上下文总预算（近似估算）
+    context_history_budget: int = 2400  # ReAct 对话历史 token 预算（替换旧硬编码条数截断）
 
     @property
     def mcp_servers(self) -> dict[str, dict[str, Any]]:

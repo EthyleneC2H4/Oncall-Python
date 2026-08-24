@@ -25,6 +25,42 @@ def _patch_project_root(monkeypatch):
     return project_root
 
 
+@pytest.fixture(autouse=True)
+def _isolated_memory_singleton(tmp_path, monkeypatch):
+    """默认隔离长期记忆单例：临时库路径 + 确定性假嵌入器
+
+    防止任何测试经 planner/react 等集成点触发真实 BGE 模型加载
+    （会发起 HuggingFace 下载，拖垮甚至卡死整个测试会话），
+    也避免测试污染仓库内 data/memory.db。
+    专测记忆行为的用例自行注入 FakeEmbedder / 换 store，不受此影响。
+    """
+    import app.services.memory as memory_pkg
+    from app.config import config
+
+    svc = memory_pkg.memory_service
+    saved_embedder = svc.embedder
+    saved_store = svc._store
+
+    class _StubEmbedder:
+        """确定性伪向量嵌入器（无模型依赖，向量随文本长度稳定变化）"""
+
+        def embed_query_safe(self, text: str) -> list[float]:
+            return [float(len(text) % 7 + 1), 1.0, 0.0]
+
+    if saved_store is not None:
+        try:
+            saved_store.close()
+        except Exception:  # noqa: BLE001 - 测试隔离尽力而为
+            pass
+
+    monkeypatch.setattr(config, "memory_db_path", str(tmp_path / "memory.db"))
+    svc.embedder = _StubEmbedder()
+    svc._store = None  # 强制下次使用时按临时路径重建
+    yield
+    svc.embedder = saved_embedder
+    svc._store = None
+
+
 # ──────────────── 外部服务 Mock ────────────────
 
 

@@ -182,6 +182,26 @@ async def planner(state: PlanExecuteState) -> dict[str, Any]:
             rag_context=experience_docs,
         )
 
+        # 步骤3.5: 召回历史事故的语义/程序记忆（经验复用闭环；失败安全）
+        try:
+            from app.core.context_engine import format_memory_block
+            from app.services.memory import MemoryType, memory_service
+
+            if memory_service.enabled:
+                recalled = await memory_service.recall(
+                    input_text, types=[MemoryType.SEMANTIC, MemoryType.PROCEDURAL]
+                )
+                memory_block = format_memory_block(recalled)
+                if memory_block:
+                    experience_context = (
+                        experience_context
+                        + "\n\n## 历史记忆（过往相似事件沉淀的经验）\n"
+                        + memory_block
+                    ).strip()
+                    logger.info(f"Planner 注入历史记忆 {len(recalled)} 条")
+        except Exception as e:
+            logger.warning(f"记忆召回失败（忽略）: {e}")
+
         # 步骤4: 创建 LLM 并生成计划
         llm = LLMFactory.create_chat_model(
             model=config.rag_model,

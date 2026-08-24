@@ -54,6 +54,7 @@ logs/
 *.pid
 
 # Database
+data/
 *.db
 *.sqlite
 

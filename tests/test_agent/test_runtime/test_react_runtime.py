@@ -263,7 +263,7 @@ class TestEnsureReady:
 
         captured = {}
 
-        def fake_create_agent(model, tools, checkpointer=None):
+        def fake_create_agent(model, tools, checkpointer=None, **kwargs):
             captured["tools"] = tools
             return object()
 

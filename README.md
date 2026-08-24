@@ -8,7 +8,8 @@
 
 ## ✨ 核心特性
 
-- 🤖 **智能对话** — LangChain 多轮对话 + 流式输出 + 上下文自动压缩
+- 🤖 **智能对话** — LangChain 多轮对话 + 流式输出 + Token 预算上下文引擎（类型化 Packet + 分配额装配 + LLM roll-up 压缩）
+- 🧵 **长期记忆** — 情景/语义/程序三类长期记忆（sqlite 持久化），向量召回 + 加权打分，情景→语义巩固的经验沉淀闭环
 - 📚 **全链路 RAG** — Query Rewrite → 向量 + BM25 双路召回 → RRF 融合 → Rerank 精排 + 结构感知 Parent-Child 分块
 - 🔧 **AIOps 诊断** — Plan-Execute-Replan 自主诊断工作流 + Harness 诊断规则约束
 - 🧠 **知识图谱** — 运维领域知识图谱，支持告警根因分析、级联预测、LLM 自动三元组抽取
@@ -151,6 +152,8 @@ python -c "import requests, os, time; [requests.post('http://localhost:9900/api/
 | KG 三元组抽取 | POST | `/api/kg/extract` | 从文档自动抽取三元组 |
 | KG 事件学习 | POST | `/api/kg/learn-incident` | 从故障事件增量学习 |
 | 用户反馈 | POST | `/api/feedback` | 提交反馈 (负反馈自动学习到 KG) |
+| 记忆查询 | GET | `/api/memory/{user_id}` | 长期记忆列举（type 过滤 + 统计） |
+| 记忆遗忘 | DELETE | `/api/memory/{user_id}` | 软删除某用户全部长期记忆 |
 | 评测运行 | POST | `/api/eval/run` | 端到端评测 (5 场景 × 4 维度) |
 | 文件上传 | POST | `/api/upload` | 上传并索引文档 |
 | 健康检查 | GET | `/health` | 服务状态检查 |
@@ -189,6 +192,8 @@ Oncall-Python/
 │   │   ├── kg.py                           #   知识图谱接口（分析/级联/抽取/学习）
 │   │   ├── multi_diag.py                   #   多 Agent 并行诊断接口
 │   │   ├── feedback.py                     #   反馈收集 + 评测运行接口
+│   │   ├── memory.py                       #   长期记忆查询/遗忘接口
+│   │   ├── event_translator.py             #   运行时事件 → 旧版 SSE dict 翻译器
 │   │   ├── file.py                         #   文件上传 + 知识库索引接口
 │   │   └── health.py                       #   健康检查接口
 │   ├── services/                           # 业务逻辑层
@@ -201,6 +206,12 @@ Oncall-Python/
 │   │   ├── bm25_retriever.py               #   BM25 稀疏检索（jieba + rank_bm25）
 │   │   ├── reranker.py                     #   Rerank 精排（本地 bge-reranker）
 │   │   ├── context_assembler.py            #   动态上下文组装（Token 优先级）
+│   │   ├── memory/                         #   长期记忆服务
+│   │   │   ├── types.py                    #     MemoryItem + 四类记忆类型
+│   │   │   ├── store.py                    #     sqlite 存储层（WAL + 软删除）
+│   │   │   ├── scoring.py                  #     打分纯函数（相关性/重要性/时近衰减）
+│   │   │   ├── queue.py                    #     单 worker 异步写队列
+│   │   │   └── service.py                  #     服务门面（write/recall/consolidate/forget）
 │   │   ├── document_splitter_service.py    #   结构感知分块 + Parent-Child 双层索引
 │   │   ├── vector_store_manager.py         #   Milvus 向量存储管理
 │   │   ├── vector_embedding_service.py     #   本地 BGE 嵌入服务
@@ -208,6 +219,14 @@ Oncall-Python/
 │   │   └── vector_search_service.py        #   语义搜索服务
 │   ├── agent/                              # Agent 模块
 │   │   ├── mcp_client.py                   #   MCP 客户端（带重试拦截器）
+│   │   ├── runtime/                        #   统一 Agent 运行时
+│   │   │   ├── base.py                     #     AgentRuntime ABC + RuntimeRegistry
+│   │   │   ├── events.py                   #     结构化事件协议（AgentEvent）
+│   │   │   ├── llm_factory.py              #     strong/weak 分层 LLM 工厂（OpenRouter）
+│   │   │   ├── middleware.py               #   Token 裁剪中间件 + 工具调用连续性修复
+│   │   │   ├── react_runtime.py            #     ReAct 运行时（记忆召回注入 + episodic 写入）
+│   │   │   ├── plan_execute_runtime.py     #     Plan-Execute 运行时包装
+│   │   │   └── parallel_runtime.py         #     多 Agent 并行运行时包装
 │   │   ├── aiops/                          #   AIOps Agent（Plan-Execute-Replan）
 │   │   │   ├── state.py                    #     状态定义（含诊断事件流）
 │   │   │   ├── planner.py                  #     规划器（路由 + KG + 增强检索 + 上下文组装）
@@ -233,6 +252,8 @@ Oncall-Python/
 │   ├── eval/                               # 评测模块
 │   │   └── evaluator.py                    #   端到端评测框架（5 场景 × 4 维度）
 │   ├── core/                               # 核心组件
+│   │   ├── context_engine.py               #   Token 预算上下文引擎（Packet/配额/压缩）
+│   │   ├── token_budget.py                 #   Token 估算与预算降级
 │   │   ├── llm_factory.py                  #   LLM 模型工厂
 │   │   └── milvus_client.py                #   Milvus 客户端管理器
 │   └── utils/
@@ -276,6 +297,21 @@ CHUNK_OVERLAP=100
 
 # 弱模型层（路由/改写等轻任务，可选免费档）
 # LLM_BACKUP_MODEL=nvidia/nemotron-3-nano-30b-a3b:free
+
+# 长期记忆（默认开启；关闭后所有记忆操作为无副作用空操作，行为与无记忆版本一致）
+# MEMORY_ENABLED=True
+# MEMORY_DB_PATH=data/memory.db
+# MEMORY_RECALL_K=5                        # 每次召回上限
+# MEMORY_MIN_IMPORTANCE=0.2                # 重要性下限过滤
+# MEMORY_DECAY_LAMBDA=0.05                 # 时近衰减 λ（每天）
+# MEMORY_WEIGHT_RELEVANCE=0.6              # 打分权重：相关性
+# MEMORY_WEIGHT_IMPORTANCE=0.25            #            重要性
+# MEMORY_WEIGHT_RECENCY=0.15               #            时近性
+# MEMORY_CONSOLIDATE_THRESHOLD=0.85        # 巩固聚类余弦阈值
+
+# 上下文引擎
+# CONTEXT_TOKEN_BUDGET=6000                # 装配总预算（token）
+# CONTEXT_HISTORY_BUDGET=2400              # 对话历史裁剪预算
 ```
 
 > **更换 Embedding 模型后**，旧向量全部失效，需执行 `make reindex-drop` 重建索引；

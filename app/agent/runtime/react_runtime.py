@@ -21,6 +21,7 @@ from loguru import logger
 from app.agent.mcp_client import get_mcp_tools
 from app.agent.runtime.base import AgentRuntime, default_registry
 from app.agent.runtime.events import AgentEvent, AgentEventEmitter, EventType
+from app.agent.runtime.middleware import TokenTrimMiddleware
 from app.config import config
 from app.core.llm_factory import LLMFactory
 
@@ -107,24 +108,69 @@ class ReActRuntime(AgentRuntime):
             streaming=self.streaming,
         )
 
-        self.agent = create_agent(
-            model,
-            tools=all_tools,
-            checkpointer=self.checkpointer,
-        )
+        # P2 修复：system_prompt 由 create_agent 在推理时统一注入（不落线程状态）。
+        # 旧实现把 SystemMessage 塞进输入消息列表，会随轮次累积进检查点；
+        # 且「最旧优先」的 token 裁剪会先砍掉携带最新记忆块的那条系统消息。
+        agent_kwargs: dict[str, Any] = {
+            "checkpointer": self.checkpointer,
+            # P2: 按 token 预算裁剪历史（替换旧硬编码条数截断）
+            "middleware": [TokenTrimMiddleware(max_tokens=config.context_history_budget)],
+        }
+        if self.system_prompt:
+            agent_kwargs["system_prompt"] = self.system_prompt
+        self.agent = create_agent(model, tools=all_tools, **agent_kwargs)
         self._initialized = True
 
         if all_tools:
             tool_names = [tool.name if hasattr(tool, "name") else str(tool) for tool in all_tools]
             logger.info(f"可用工具列表: {', '.join(tool_names)}")
 
-    def _build_input(self, task: str) -> dict[str, Any]:
-        """构建 Agent 输入消息列表"""
-        messages: list = []
-        if self.system_prompt:
-            messages.append(SystemMessage(content=self.system_prompt))
-        messages.append(HumanMessage(content=task))
-        return {"messages": messages}
+    def _build_input(self, task: str, *, memory_block: str = "") -> dict[str, Any]:
+        """构建 Agent 输入消息列表
+
+        Args:
+            task: 用户任务
+            memory_block: 记忆召回块（非空时作为本轮用户消息前缀注入；
+                不再走 SystemMessage —— 那会随轮次累积进检查点状态，
+                并被最旧优先的 token 裁剪优先砍掉携带最新记忆的消息）
+        """
+        content = f"[相关记忆]\n{memory_block}\n\n{task}" if memory_block else task
+        return {"messages": [HumanMessage(content=content)]}
+
+    async def _recall_memory(self, task: str) -> str:
+        """召回与任务相关的长期记忆（失败安全，disabled 时返回空串）"""
+        try:
+            from app.core.context_engine import format_memory_block
+            from app.services.memory import MemoryType, memory_service
+
+            if not memory_service.enabled:
+                return ""
+            recalled = await memory_service.recall(
+                task, types=[MemoryType.EPISODIC, MemoryType.SEMANTIC, MemoryType.PROCEDURAL]
+            )
+            return format_memory_block(recalled)
+        except Exception as e:
+            logger.warning(f"记忆召回失败（忽略）: {e}")
+            return ""
+
+    async def _remember_turn(self, task: str, answer: str, tool_calls: int, session_id: str) -> None:
+        """把本轮交互写入情景记忆（失败安全）"""
+        if not answer.strip():
+            return
+        try:
+            from app.services.memory import memory_service
+
+            if not memory_service.enabled:
+                return
+            importance = min(0.3 + 0.05 * tool_calls, 0.6)
+            await memory_service.write_episodic(
+                f"Q: {task}\nA: {answer[:500]}",
+                session_id=session_id,
+                importance=importance,
+                metadata={"runtime": "react", "tool_calls": tool_calls},
+            )
+        except Exception as e:
+            logger.warning(f"情景记忆写入失败（忽略）: {e}")
 
     async def run(self, task: str, session_id: str = "default") -> AsyncIterator[AgentEvent]:
         """流式执行一次查询，产出 TOKEN / TOOL_START / TOOL_END / COMPLETE|ERROR"""
@@ -136,10 +182,16 @@ class ReActRuntime(AgentRuntime):
 
             logger.info(f"[会话 {session_id}] ReActRuntime 收到任务: {task}")
 
-            agent_input = self._build_input(task)
+            # P2: 轮前召回长期记忆注入 system prompt 尾部（经验复用闭环）
+            memory_block = await self._recall_memory(task)
+            agent_input = self._build_input(task, memory_block=memory_block)
+            if memory_block:
+                logger.info(f"[会话 {session_id}] 注入记忆召回块 ({len(memory_block)} 字符)")
+
             run_config = {"configurable": {"thread_id": session_id}}
 
             answer_parts: list[str] = []
+            tool_event_count = 0
             # tool_call id → {"name","args"}，用于 TOOL_END 时回填工具名
             pending_calls: dict[str, dict[str, Any]] = {}
 
@@ -163,11 +215,17 @@ class ReActRuntime(AgentRuntime):
                         yield event
                 else:
                     # updates：{node_name: state_delta}
-                    for event in self._emit_update_events(chunk, emitter, pending_calls):
+                    new_events = self._emit_update_events(chunk, emitter, pending_calls)
+                    tool_event_count += sum(1 for e in new_events if e.type is EventType.TOOL_START)
+                    for event in new_events:
                         yield event
 
+            final_answer = "".join(answer_parts)
+            # P2: 轮后写入情景记忆（下次同类问题可被召回）
+            await self._remember_turn(task, final_answer, tool_event_count, session_id)
+
             logger.info(f"[会话 {session_id}] ReActRuntime 任务完成")
-            yield emitter.emit(EventType.COMPLETE, message="查询完成", answer="".join(answer_parts))
+            yield emitter.emit(EventType.COMPLETE, message="查询完成", answer=final_answer)
 
         except Exception as e:
             # ERROR 即终止事件：流正常收尾，不再向消费方抛异常
