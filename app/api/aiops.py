@@ -8,6 +8,7 @@ from fastapi import APIRouter
 from loguru import logger
 from sse_starlette.sse import EventSourceResponse
 
+from app.api.event_translator import agent_event_to_legacy
 from app.models.aiops import AIOpsRequest
 from app.services.aiops_service import aiops_service
 
@@ -127,7 +128,12 @@ async def diagnose_stream(request: AIOpsRequest):
 
     async def event_generator():
         try:
-            async for event in aiops_service.diagnose(session_id=session_id):
+            async for runtime_event in aiops_service.diagnose(session_id=session_id):
+                # AgentEvent → 旧版 SSE dict 契约（golden 快照钉死，只增不改）
+                event = agent_event_to_legacy(runtime_event, diagnosis_mode=True)
+                if event is None:
+                    continue
+
                 # 发送事件
                 yield {"event": "message", "data": json.dumps(event, ensure_ascii=False)}
 

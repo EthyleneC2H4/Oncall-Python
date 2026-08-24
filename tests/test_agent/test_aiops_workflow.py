@@ -91,7 +91,7 @@ class TestPlanner:
             patch("app.agent.aiops.planner.retrieve_knowledge"),
             patch("app.agent.aiops.planner.LLMFactory") as mock_llm,
             patch(
-                "app.agent.aiops.planner.get_mcp_client_with_retry", new_callable=AsyncMock
+                "app.agent.aiops.planner.get_mcp_tools", new_callable=AsyncMock
             ) as mock_mcp,
             patch("app.agent.aiops.planner.knowledge_graph_service") as mock_kg,
             patch("app.agent.aiops.planner.config"),
@@ -117,13 +117,11 @@ class TestPlanner:
             # Mock KG
             mock_kg.format_analysis_context.return_value = "## CPU告警分析\n- 常见根因: 内存泄漏"
 
-            # Mock MCP
+            # Mock MCP（get_mcp_tools 直接返回工具列表）
             mock_mcp_tool = MagicMock()
             mock_mcp_tool.name = "search_log"
             mock_mcp_tool.description = "搜索日志"
-            mock_client = AsyncMock()
-            mock_client.get_tools = AsyncMock(return_value=[mock_mcp_tool])
-            mock_mcp.return_value = mock_client
+            mock_mcp.return_value = [mock_mcp_tool]
 
             # Mock LLM: Planner 经 with_structured_output 链返回真实 Plan 对象
             from app.agent.aiops.planner import Plan
@@ -171,7 +169,7 @@ class TestPlanner:
             patch("app.agent.aiops.planner.query_router") as mock_router,
             patch("app.agent.aiops.planner.LLMFactory") as mock_llm,
             patch(
-                "app.agent.aiops.planner.get_mcp_client_with_retry", new_callable=AsyncMock
+                "app.agent.aiops.planner.get_mcp_tools", new_callable=AsyncMock
             ) as mock_mcp,
             patch("app.agent.aiops.planner.knowledge_graph_service") as mock_kg,
             patch("app.agent.aiops.planner.config"),
@@ -184,9 +182,7 @@ class TestPlanner:
                 "use_kg": False,
                 "rag_top_k": 0,
             }
-            mock_mcp_client = AsyncMock()
-            mock_mcp_client.get_tools = AsyncMock(return_value=[])
-            mock_mcp.return_value = mock_mcp_client
+            mock_mcp.return_value = []
             mock_kg.format_analysis_context.return_value = ""
 
             # LLM 失败（结构化输出链共享同一响应序列）
@@ -227,7 +223,7 @@ class TestExecutor:
             patch("app.agent.aiops.executor.LLMFactory") as mock_llm,
             patch("app.agent.aiops.executor.ToolNode") as mock_tool_node,
             patch(
-                "app.agent.aiops.executor.get_mcp_client_with_retry", new_callable=AsyncMock
+                "app.agent.aiops.executor.get_mcp_tools", new_callable=AsyncMock
             ) as mock_mcp,
             patch("app.agent.aiops.executor.config") as mock_config,
         ):
@@ -235,16 +231,12 @@ class TestExecutor:
             # config 整体被打桩：wait_for 需要数值型超时
             mock_config.step_timeout_seconds = 30
 
-            mock_mcp_client = AsyncMock()
-            mock_mcp_client.get_tools = AsyncMock(return_value=[])
-            mock_mcp.return_value = mock_mcp_client
+            mock_mcp.return_value = []
 
             # Mock LLM: bind_tools 后直接返回文本（不调用工具）
             mock_llm.create_chat_model.return_value = make_mock_llm(
                 [MagicMock(content="已查询知识图谱，未发现相关告警记录。", tool_calls=[])]
             )
-            # config 整体被打桩：wait_for 需要数值型超时
-            mock_config.step_timeout_seconds = 30
 
             # Mock ToolNode
             mock_tool_node.return_value = MagicMock()
@@ -282,16 +274,14 @@ class TestExecutor:
             patch("app.agent.aiops.executor.LLMFactory") as mock_llm,
             patch("app.agent.aiops.executor.ToolNode") as mock_tool_node,
             patch(
-                "app.agent.aiops.executor.get_mcp_client_with_retry", new_callable=AsyncMock
+                "app.agent.aiops.executor.get_mcp_tools", new_callable=AsyncMock
             ) as mock_mcp,
             patch("app.agent.aiops.executor.config") as mock_config,
         ):
 
             mock_config.step_timeout_seconds = 30
 
-            mock_mcp_client = AsyncMock()
-            mock_mcp_client.get_tools = AsyncMock(return_value=[])
-            mock_mcp.return_value = mock_mcp_client
+            mock_mcp.return_value = []
 
             mock_llm.create_chat_model.return_value = make_mock_llm(
                 [MagicMock(content="第二步执行完成。", tool_calls=[])]
@@ -323,16 +313,14 @@ class TestExecutor:
             patch("app.agent.aiops.executor.LLMFactory") as mock_llm,
             patch("app.agent.aiops.executor.ToolNode"),
             patch(
-                "app.agent.aiops.executor.get_mcp_client_with_retry", new_callable=AsyncMock
+                "app.agent.aiops.executor.get_mcp_tools", new_callable=AsyncMock
             ) as mock_mcp,
             patch("app.agent.aiops.executor.config") as mock_config,
         ):
 
             mock_config.step_timeout_seconds = 0.001  # 1ms 超时 → 必然触发
 
-            mock_mcp_client = AsyncMock()
-            mock_mcp_client.get_tools = AsyncMock(return_value=[])
-            mock_mcp.return_value = mock_mcp_client
+            mock_mcp.return_value = []
 
             # LLM 长时间阻塞
             async def slow_response(*args, **kwargs):
@@ -383,15 +371,13 @@ class TestReplanner:
         with (
             patch("app.agent.aiops.replanner.LLMFactory") as mock_llm,
             patch(
-                "app.agent.aiops.replanner.get_mcp_client_with_retry", new_callable=AsyncMock
+                "app.agent.aiops.replanner.get_mcp_tools", new_callable=AsyncMock
             ) as mock_mcp,
             patch("app.agent.aiops.replanner.config"),
         ):
 
             # Mock MCP（respond 全路径会拉取工具列表）
-            mock_mcp_client = AsyncMock()
-            mock_mcp_client.get_tools = AsyncMock(return_value=[])
-            mock_mcp.return_value = mock_mcp_client
+            mock_mcp.return_value = []
 
             # Mock Replanner LLM → respond（Act 链与 Response 链共享响应序列）
             from app.agent.aiops.replanner import Act, Response
@@ -644,7 +630,8 @@ class TestWorkflowIntegration:
 
     @pytest.mark.asyncio
     async def test_service_execute_with_mocks(self):
-        """端到端: execute() 应产生完整事件流"""
+        """端到端: execute() 应产生完整 AgentEvent 流（PLAN_CREATED → ... → COMPLETE）"""
+        from app.agent.runtime.events import EventType
         from app.services.aiops_service import AIOpsService
 
         service = AIOpsService()
@@ -655,7 +642,7 @@ class TestWorkflowIntegration:
             patch("app.agent.aiops.planner.query_router") as mock_router,
             patch("app.agent.aiops.planner.LLMFactory") as mock_planner_llm,
             patch(
-                "app.agent.aiops.planner.get_mcp_client_with_retry", new_callable=AsyncMock
+                "app.agent.aiops.planner.get_mcp_tools", new_callable=AsyncMock
             ) as mock_mcp1,
             patch("app.agent.aiops.planner.knowledge_graph_service") as mock_kg,
             patch("app.agent.aiops.planner.config"),
@@ -667,10 +654,13 @@ class TestWorkflowIntegration:
             patch("app.agent.aiops.executor.LLMFactory") as mock_executor_llm,
             patch("app.agent.aiops.executor.ToolNode") as mock_tool_node,
             patch(
-                "app.agent.aiops.executor.get_mcp_client_with_retry", new_callable=AsyncMock
+                "app.agent.aiops.executor.get_mcp_tools", new_callable=AsyncMock
             ) as mock_mcp2,
-            patch("app.agent.aiops.executor.config"),
+            patch("app.agent.aiops.executor.config") as mock_executor_config,
             patch("app.agent.aiops.replanner.LLMFactory") as mock_replanner_llm,
+            patch(
+                "app.agent.aiops.replanner.get_mcp_tools", new_callable=AsyncMock
+            ) as mock_mcp3,
             patch("app.agent.aiops.replanner.config"),
         ):
 
@@ -688,42 +678,51 @@ class TestWorkflowIntegration:
             mock_planner_llm.create_chat_model.return_value = make_mock_llm(
                 [Plan(steps=["查询CPU知识图谱", "检索文档", "生成报告"])]
             )
-            mock_mcp_client1 = AsyncMock()
-            mock_mcp_client1.get_tools = AsyncMock(return_value=[])
-            mock_mcp1.return_value = mock_mcp_client1
+            mock_mcp1.return_value = []
 
             # --- Mock Executor ---
+            # step_timeout 必须为数值，否则 wait_for 直接 TypeError、步骤全部走异常分支
+            mock_executor_config.step_timeout_seconds = 30
             mock_executor_llm.create_chat_model.return_value = make_mock_llm(
-                [MagicMock(content="步骤执行完成", tool_calls=[])]
+                [
+                    MagicMock(content="步骤执行完成", tool_calls=[]),
+                    MagicMock(content="步骤执行完成", tool_calls=[]),
+                    MagicMock(content="步骤执行完成", tool_calls=[]),
+                ]
             )
             mock_tool_node.return_value = MagicMock()
-            mock_mcp_client2 = AsyncMock()
-            mock_mcp_client2.get_tools = AsyncMock(return_value=[])
-            mock_mcp2.return_value = mock_mcp_client2
+            mock_mcp2.return_value = []
 
             # --- Mock Replanner ---
-            # 前两次返回 continue，第三次返回 respond，最后生成最终报告
+            # 第1、2轮返回 continue；第3轮计划已空，直接进入最终响应生成
             from app.agent.aiops.replanner import Act, Response
 
             mock_act_continue = Act(action="continue", new_steps=[])
-            mock_act_respond = Act(action="respond", new_steps=[])
             mock_response = Response(response="# 诊断报告\n\n根因: 内存泄漏\n\n建议: 重启并导出堆dump")
 
             mock_replanner_llm.create_chat_model.return_value = make_mock_llm(
                 [
-                    mock_act_continue,  # 第1次: continue
-                    mock_act_continue,  # 第2次: continue
-                    mock_act_respond,  # 第3次: respond
-                    mock_response,  # 最终报告
+                    mock_act_continue,  # 第1轮: 还有剩余步骤 → continue
+                    mock_act_continue,  # 第2轮: 还有剩余步骤 → continue
+                    mock_response,  # 第3轮: 计划已空 → 最终报告
                 ]
             )
+            mock_mcp3.return_value = []
 
             # 执行
             events = []
             async for event in service.execute("CPU使用率超过90%", "test-session-001"):
                 events.append(event)
 
-            # 验证完整事件流
-            event_types = [e.get("type", "") for e in events]
-            assert "plan_created" in event_types or any("plan" in str(e).lower() for e in events)
-            assert "complete" in event_types  # 最终事件
+            # 验证完整 AgentEvent 流
+            event_types = [e.type for e in events]
+            assert EventType.PLAN_CREATED in event_types
+            assert EventType.REPORT in event_types
+            assert event_types[-1] is EventType.COMPLETE  # 终止事件收尾
+
+            # seq 单调递增，且 COMPLETE 携带最终响应
+            seqs = [e.seq for e in events]
+            assert seqs == list(range(1, len(events) + 1))
+            complete_payload = events[-1].payload
+            assert "内存泄漏" in complete_payload["response"]
+            assert complete_payload["timed_out"] is False

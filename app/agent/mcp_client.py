@@ -4,6 +4,7 @@ MCP 客户端管理
 """
 
 import asyncio
+import time
 from typing import Any
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -169,3 +170,56 @@ def _create_mcp_client(
 
     # 第一个参数是 servers 配置，直接传递
     return MultiServerMCPClient(servers, **kwargs)  # type: ignore[arg-type]
+
+
+# ──────────────── 工具列表短 TTL 缓存 ────────────────
+# 一次工作流运行内 planner/executor/replanner 多个节点都需要工具列表；
+# TTL 缓存避免每个节点、每一步都重新拉取（P1.1：每次 run 拉取一次而非每步）。
+# TTL 到期后自动刷新，兼顾动态工具发现；拉取失败时回退过期缓存。
+
+MCP_TOOLS_TTL_SECONDS = 30.0
+
+_mcp_tools_cache: list = []
+_mcp_tools_cached_at: float = 0.0
+
+
+async def get_mcp_tools(
+    ttl_seconds: float = MCP_TOOLS_TTL_SECONDS, *, refresh: bool = False
+) -> list:
+    """获取 MCP 工具列表（带短 TTL 缓存）
+
+    Args:
+        ttl_seconds: 缓存存活时间（秒），默认 30s——覆盖单次工作流运行的典型时长，
+            又不至于让新增工具长时间不可见
+        refresh: 为 True 时跳过缓存强制刷新
+
+    Returns:
+        list: MCP 工具列表；拉取失败时若有过期缓存则回退返回缓存，否则抛出异常
+    """
+    global _mcp_tools_cache, _mcp_tools_cached_at
+
+    now = time.monotonic()
+    if not refresh and _mcp_tools_cache and (now - _mcp_tools_cached_at) < ttl_seconds:
+        return _mcp_tools_cache
+
+    try:
+        client = await get_mcp_client_with_retry()
+        tools = await client.get_tools()
+    except Exception as e:
+        if _mcp_tools_cache:
+            logger.warning(
+                f"MCP 工具拉取失败，回退使用过期缓存 ({len(_mcp_tools_cache)} 个): {e}"
+            )
+            return _mcp_tools_cache
+        raise
+
+    _mcp_tools_cache = tools
+    _mcp_tools_cached_at = now
+    return tools
+
+
+def reset_mcp_tools_cache() -> None:
+    """清空工具列表缓存（测试与热刷新用）"""
+    global _mcp_tools_cache, _mcp_tools_cached_at
+    _mcp_tools_cache = []
+    _mcp_tools_cached_at = 0.0

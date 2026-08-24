@@ -7,7 +7,7 @@
 from langchain_core.messages import HumanMessage, SystemMessage
 from loguru import logger
 
-from app.agent.mcp_client import get_mcp_client_with_retry
+from app.agent.mcp_client import get_mcp_tools
 from app.config import config
 from app.core.llm_factory import LLMFactory
 from app.tools import predict_alert_cascade, query_alert_graph, retrieve_knowledge
@@ -52,9 +52,8 @@ class LogAnalystAgent(BaseSpecialistAgent):
 
     async def analyze(self, alert_input: str) -> str:
         try:
-            # 获取 MCP 工具（日志查询）
-            mcp_client = await get_mcp_client_with_retry()
-            mcp_tools = await mcp_client.get_tools()
+            # 获取 MCP 工具（日志查询，短 TTL 缓存）
+            mcp_tools = await get_mcp_tools()
 
             # 找到日志相关工具
             log_tools = [t for t in mcp_tools if "log" in t.name.lower() or "cls" in t.name.lower()]
@@ -118,8 +117,8 @@ class MetricInspectorAgent(BaseSpecialistAgent):
 
     async def analyze(self, alert_input: str) -> str:
         try:
-            mcp_client = await get_mcp_client_with_retry()
-            mcp_tools = await mcp_client.get_tools()
+            # 获取 MCP 工具（短 TTL 缓存）
+            mcp_tools = await get_mcp_tools()
 
             # 找到指标相关工具
             metric_tools = [

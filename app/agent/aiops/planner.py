@@ -11,7 +11,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from app.agent.mcp_client import get_mcp_client_with_retry
+from app.agent.mcp_client import get_mcp_tools
 from app.config import config
 from app.core.llm_factory import LLMFactory
 from app.services.context_assembler import context_assembler
@@ -166,9 +166,8 @@ async def planner(state: PlanExecuteState) -> dict[str, Any]:
             predict_alert_cascade,
         ]
 
-        # 获取 MCP 工具
-        mcp_client = await get_mcp_client_with_retry()
-        mcp_tools = await mcp_client.get_tools()
+        # 获取 MCP 工具（短 TTL 缓存，一次运行内复用）
+        mcp_tools = await get_mcp_tools()
 
         # 合并所有工具
         all_tools = local_tools + mcp_tools

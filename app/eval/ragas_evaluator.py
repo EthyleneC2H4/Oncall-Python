@@ -253,8 +253,9 @@ class RAGASEvaluator:
                 embeddings=self._get_evaluator_embeddings(),
             )
 
-            # 解析结果（ragas 0.4 的返回类型标注含 Executor 分支，实际为同步结果）
-            to_pandas = result.to_pandas
+            # 解析结果（ragas 0.4 的返回类型标注含 Executor 分支，实际为同步结果）；
+            # 经 getattr 取方法以绕开 mypy 对该联合类型的误报（B009 豁免即为此）
+            to_pandas = getattr(result, "to_pandas")  # noqa: B009
             scores_df = to_pandas()
             per_case_scores = scores_df.to_dict(orient="records")
 

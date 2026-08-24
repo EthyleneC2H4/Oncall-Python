@@ -42,15 +42,17 @@ class LLMFactory:
             temperature: 采样温度
             streaming: 是否流式
             base_url: OpenAI 兼容端点，默认 OpenRouter
-            api_key: API Key，默认从配置读取环境变量 OPENROUTER_API_KEY
+            api_key: API Key；仅当调用方显式注入时绕过实例缓存
+                （测试隔离语义），生产路径一律从配置读取并复用缓存实例
         """
+        explicit_key = api_key
         model = model or config.rag_model
         base_url = base_url or config.openrouter_base_url
-        api_key = api_key or config.openrouter_api_key
+        api_key = explicit_key or config.openrouter_api_key
 
-        cache_key = (model, temperature, streaming)
+        cache_key = (model, temperature, streaming, base_url, api_key)
         cached = cls._instances.get(cache_key)
-        if cached is not None and not api_key:
+        if cached is not None:
             return cached
 
         llm = ChatOpenAI(
@@ -60,7 +62,7 @@ class LLMFactory:
             base_url=base_url,
             api_key=SecretStr(api_key) if api_key else None,
         )
-        if not api_key:  # 仅缓存默认凭证的实例（测试注入自定义 key 时不缓存）
+        if explicit_key is None:  # 默认凭证路径进缓存；显式注入的实例不缓存、不污染
             cls._instances[cache_key] = llm
         return llm
 
