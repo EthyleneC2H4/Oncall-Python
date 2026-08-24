@@ -1,6 +1,6 @@
 [project]
 name = "super-biz-agent-py"
-version = "2.0.0"
+version = "2.1.0"
 description = "基于 LangChain 的智能业务代理系统 - 支持 RAG 知识库和 AIOps 智能运维"
 authors = [{name = "chief"}]
 readme = "README.md"
@@ -46,6 +46,7 @@ dev = [
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
     "pytest-mock>=3.12.0",
+    "pytest-timeout>=2.2.0",
     "black>=23.12.0",
     "ruff>=0.1.9",
     "isort>=5.13.0",

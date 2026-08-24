@@ -38,14 +38,13 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: '3.11'
-      - run: uv sync --group dev
+      - run: uv sync --extra dev
       - name: ruff check
         run: uv run ruff check app/
       - name: ruff format check
         run: uv run ruff format --check app/
       - name: mypy check
-        run: uv run mypy app/ --ignore-missing-imports || true
-        continue-on-error: true
+        run: uv run mypy app/ --ignore-missing-imports
 
   # ──────────────── Unit Tests ────────────────
   unit-tests:
@@ -56,13 +55,14 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: '3.11'
-      - run: uv sync --group dev
+      - run: uv sync --extra dev
+      # 测试失败必须让作业红：此前 exit code 被 || echo 吞掉，
+      # 失败的 pytest 也显示绿色（门禁形同虚设）
       - name: Run unit tests
         run: |
-          uv run pytest tests/test_core/ tests/test_api/ tests/test_eval/ tests/test_agent/ \
+          uv run pytest tests/ \
             -v --tb=short --cov=app --cov-report=term-missing --cov-report=html \
-            --timeout=120 \
-            || echo "UNIT_TESTS_FAILED=true" >> $GITHUB_ENV
+            --timeout=120
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v4
