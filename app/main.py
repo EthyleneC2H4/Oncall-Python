@@ -115,21 +115,26 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# 配置 CORS
+# 配置 CORS（修复旧配置的无效组合：allow_origins=["*"] + credentials=True
+# 违反浏览器规范，实际会被浏览器拒绝；通配时强制关闭 credentials）
+_origins = list(config.cors_allow_origins)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 生产环境应该限制具体域名
-    allow_credentials=True,
+    allow_origins=_origins,
+    allow_credentials=config.cors_allow_credentials and "*" not in _origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # 注册工程化中间件
+from app.middleware.auth import APIKeyMiddleware  # noqa: E402
 from app.middleware.rate_limiter import RateLimiterMiddleware  # noqa: E402
 from app.middleware.request_guard import RequestGuardMiddleware  # noqa: E402
 
 app.add_middleware(RequestGuardMiddleware)
 app.add_middleware(RateLimiterMiddleware)
+# 鉴权最外层（默认关闭）：无效密钥在限流计数前就被拒绝
+app.add_middleware(APIKeyMiddleware)
 
 # 注册路由
 app.include_router(health.router, tags=["健康检查"])

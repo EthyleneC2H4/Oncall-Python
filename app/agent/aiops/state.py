@@ -13,8 +13,12 @@ class PlanExecuteState(TypedDict):
     # 用户输入（任务描述）
     input: str
 
-    # 执行计划（步骤列表）
+    # 执行计划（步骤列表，旧 List[str] 契约）
     plan: list[str]
+
+    # 结构化计划（P3）：与 plan 一一对应的步骤字典列表
+    # 每项: {"id","description","tool","args","depends_on","expected_evidence"}
+    plan_structured: list[dict]
 
     # 已执行的步骤历史
     # 使用 operator.add 实现追加式更新（而非覆盖）

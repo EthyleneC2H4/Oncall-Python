@@ -160,3 +160,40 @@ class TestAdditiveTypes:
 
         assert complete["type"] in ("complete",)
         assert error["type"] in ("error",)
+
+
+class TestPlanStructuredAdditive:
+    def test_plan_structured_passthrough_adds_field(self):
+        """P3 只增不改：plan_structured 作为新增可选字段透传，旧字段原样"""
+        event = emit(
+            EventType.PLAN_CREATED,
+            message="执行计划已制定，共 1 个步骤",
+            plan=["查询错误日志"],
+            plan_structured=[
+                {
+                    "id": "1",
+                    "description": "查询错误日志",
+                    "tool": "search_log",
+                    "args": {"topic_id": "t-1"},
+                    "depends_on": [],
+                    "expected_evidence": "日志",
+                }
+            ],
+        )
+
+        legacy = agent_event_to_legacy(event)
+        # 旧契约字段原样保留
+        assert legacy["type"] == "plan"
+        assert legacy["stage"] == "plan_created"
+        assert legacy["plan"] == ["查询错误日志"]
+        # 新增字段整体透传，不做形状改写
+        assert legacy["plan_structured"][0]["tool"] == "search_log"
+        assert legacy["plan_structured"][0]["args"] == {"topic_id": "t-1"}
+
+    def test_plan_without_structured_stays_golden(self):
+        """未携带 plan_structured 时输出与既有 golden 完全一致（无空键污染）"""
+        event = emit(EventType.PLAN_CREATED, message="执行计划已制定，共 1 个步骤", plan=["仅一步"])
+
+        legacy = agent_event_to_legacy(event)
+        assert "plan_structured" not in legacy
+        assert set(legacy) == {"type", "stage", "message", "plan"}

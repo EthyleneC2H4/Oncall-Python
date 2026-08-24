@@ -51,6 +51,9 @@ def agent_event_to_legacy(
             legacy["query_intent"] = payload["query_intent"]
         if payload.get("diagnosis_events"):
             legacy["diagnosis_events"] = payload["diagnosis_events"]
+        # P3 只增不改：结构化计划作为新增可选字段
+        if payload.get("plan_structured"):
+            legacy["plan_structured"] = payload["plan_structured"]
         return legacy
 
     if event.type is EventType.STEP_END:

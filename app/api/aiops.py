@@ -2,15 +2,18 @@
 AIOps 智能运维接口
 """
 
+import asyncio
 import json
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from loguru import logger
 from sse_starlette.sse import EventSourceResponse
 
 from app.api.event_translator import agent_event_to_legacy
 from app.models.aiops import AIOpsRequest
 from app.services.aiops_service import aiops_service
+from app.services.pending_actions import ActionStatus, get_pending_action_store
+from app.tools.guard import decide_action, execute_approved
 
 router = APIRouter()
 
@@ -154,3 +157,67 @@ async def diagnose_stream(request: AIOpsRequest):
             }
 
     return EventSourceResponse(event_generator())
+
+
+# ──────────────── 高风险动作审批（P3 强制确认门） ────────────────
+
+
+def _action_to_dict(action) -> dict:  # noqa: ANN001 - PendingAction 模型避免循环导入
+    return {
+        "action_id": action.action_id,
+        "tool_name": action.tool_name,
+        "args": action.args,
+        "reason": action.reason,
+        "session_id": action.session_id,
+        "status": action.status.value,
+        "created_at": action.created_at,
+        "decided_at": action.decided_at,
+        "result_preview": action.result_preview,
+    }
+
+
+@router.get("/actions/pending")
+async def list_pending_actions():
+    """列出待人工裁决的高风险动作"""
+    store = get_pending_action_store()
+    pending = await asyncio.to_thread(store.list_pending)
+    return {"code": 200, "data": {"total": len(pending), "actions": [_action_to_dict(a) for a in pending]}}
+
+
+@router.post("/actions/{action_id}/approve")
+async def approve_action(action_id: str):
+    """批准并补执行一个高风险动作
+
+    流程：pending → approved → 原子认领(executed) → 按登记的参数补执行 → 回填结果预览。
+    重复/并发 approve 因认领恰好一次语义而只会真正执行一次。
+    """
+    logger.info(f"审批请求: approve {action_id}")
+    store = get_pending_action_store()
+    decided = await asyncio.to_thread(decide_action, action_id, ActionStatus.APPROVED)
+    if decided is None:
+        raise HTTPException(status_code=404, detail=f"待审动作不存在: {action_id}")
+    if decided.status is not ActionStatus.APPROVED:
+        # 已裁决/已过期/已执行：返回现状态，不重复执行
+        return {"code": 200, "data": {"action": _action_to_dict(decided), "executed": False}}
+
+    result = await execute_approved(decided)
+    refreshed = await asyncio.to_thread(store.get, action_id)
+    return {
+        "code": 200,
+        "data": {
+            "executed": result.ok,
+            "result_preview": (result.value if result.ok else "")[:500],
+            "error": result.error if not result.ok else "",
+            "action": _action_to_dict(refreshed) if refreshed else None,
+        },
+    }
+
+
+@router.post("/actions/{action_id}/reject")
+async def reject_action(action_id: str):
+    """拒绝一个高风险动作（终态，不执行）"""
+    logger.info(f"审批请求: reject {action_id}")
+    decided = await asyncio.to_thread(decide_action, action_id, ActionStatus.REJECTED)
+    if decided is None:
+        raise HTTPException(status_code=404, detail=f"待审动作不存在: {action_id}")
+    return {"code": 200, "data": {"action": _action_to_dict(decided), "executed": False}}

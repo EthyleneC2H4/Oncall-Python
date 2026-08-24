@@ -726,3 +726,85 @@ class TestWorkflowIntegration:
             complete_payload = events[-1].payload
             assert "内存泄漏" in complete_payload["response"]
             assert complete_payload["timed_out"] is False
+
+
+class TestP3Alignment:
+    """P3 对抗评审确认缺陷的回归测试：plan/plan_structured 逐位置对齐不变量"""
+
+    @pytest.mark.asyncio
+    async def test_executor_discards_misaligned_structured_view(self):
+        """数量错位时必须整体弃用结构化视图，按 legacy 列表执行（曾错位覆盖 task）"""
+        from app.agent.aiops.executor import executor
+        from app.agent.aiops.state import PlanExecuteState
+
+        state = PlanExecuteState(
+            input="测试",
+            plan=["真实第一步", "第二步"],
+            # 长度 1 ≠ plan 的 2：模拟历史残留/解析滤步造成的错位
+            plan_structured=[
+                {"id": "1", "description": "伪造步骤", "tool": "retrieve_knowledge", "args": {}}
+            ],
+            past_steps=[],
+            response="",
+            kg_context="",
+            query_intent="DIAGNOSTIC",
+            diagnosis_events=[],
+            error_context=[],
+            degradation_level="none",
+        )
+
+        with (
+            patch("app.agent.aiops.executor.LLMFactory") as mock_llm,
+            patch("app.agent.aiops.executor.ToolNode") as mock_tool_node,
+            patch(
+                "app.agent.aiops.executor.get_mcp_tools", new_callable=AsyncMock
+            ) as mock_mcp,
+            patch("app.agent.aiops.executor.config") as mock_config,
+        ):
+            mock_config.step_timeout_seconds = 30
+            mock_mcp.return_value = []
+            mock_llm.create_chat_model.return_value = make_mock_llm(
+                [MagicMock(content="完成", tool_calls=[])]
+            )
+            mock_tool_node.return_value = MagicMock()
+
+            result = await executor(state)
+
+            # 执行的是 legacy 列表的真实第一步，而非结构化视图里的伪造描述
+            assert result["past_steps"][0][0] == "真实第一步"
+
+    @pytest.mark.asyncio
+    async def test_replanner_replan_keeps_views_aligned_with_blank_steps(self):
+        """replan 含空白步骤时两列视图必须同源同长（曾 5 vs 3 错位）"""
+        from app.agent.aiops.replanner import Act, replanner
+        from app.agent.aiops.state import PlanExecuteState
+
+        state = PlanExecuteState(
+            input="复杂诊断",
+            plan=["旧步骤1", "旧步骤2", "旧步骤3"],
+            past_steps=[("旧步骤0", "部分信息")],
+            response="",
+            kg_context="",
+            query_intent="DIAGNOSTIC",
+            diagnosis_events=[],
+            error_context=[],
+            degradation_level="none",
+        )
+
+        with (
+            patch("app.agent.aiops.replanner.LLMFactory") as mock_llm,
+            patch(
+                "app.agent.aiops.replanner.get_mcp_tools", new_callable=AsyncMock
+            ) as mock_mcp,
+            patch("app.agent.aiops.replanner.config"),
+        ):
+            mock_mcp.return_value = []
+            act = Act(action="replan", new_steps=["查日志", "   ", "综合判断"])
+            mock_llm.create_chat_model.return_value = make_mock_llm([act])
+
+            result = await replanner(state)
+
+            assert len(result["plan"]) == len(result["plan_structured"]) == 2
+            # 两列同源：plan 即 rebuilt 的 legacy 表示（空白项已剔除）
+            assert result["plan"] == ["查日志", "综合判断"]
+            assert [s["description"] for s in result["plan_structured"]] == result["plan"]

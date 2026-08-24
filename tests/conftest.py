@@ -61,6 +61,30 @@ def _isolated_memory_singleton(tmp_path, monkeypatch):
     svc._store = None
 
 
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    """每个测试前清空进程内限流计数
+
+    所有 API 测试共享同一 app 实例与限流器状态（global session 10 req/min），
+    测试数一多就会互相挤爆配额导致 429 污染下游断言。
+    """
+    try:
+        from app.main import app
+        from app.middleware.rate_limiter import RateLimiterMiddleware
+
+        node = getattr(app, "middleware_stack", None)
+        while node is not None:
+            if isinstance(node, RateLimiterMiddleware):
+                node._global_counter._requests.clear()
+                node._aiops_counter._requests.clear()
+                node._session_counters.clear()
+                break
+            node = getattr(node, "app", None)
+    except Exception:  # noqa: BLE001 - 非 API 测试或栈未构建时静默跳过
+        pass
+    yield
+
+
 # ──────────────── 外部服务 Mock ────────────────
 
 

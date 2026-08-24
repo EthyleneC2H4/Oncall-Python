@@ -33,12 +33,19 @@ NODE_REPLANNER = "replanner"
 _STEP_PREVIEW_CHARS = 300
 
 
-def translate_graph_update(update: dict[str, Any], emitter: AgentEventEmitter) -> list[AgentEvent]:
+def translate_graph_update(
+    update: dict[str, Any],
+    emitter: AgentEventEmitter,
+    *,
+    steps_done_base: int = 0,
+) -> list[AgentEvent]:
     """把单个节点的状态增量翻译为结构化事件（纯函数，便于测试）
 
     Args:
         update: astream(stream_mode="updates") 的单个 chunk，{node_name: node_output}
         emitter: 当前 run 的事件发射器
+        steps_done_base: 本 chunk 之前已累计完成的步骤数（STEP_END 进度用；
+            executor 增量只含本次步骤，须由调用方累加）
 
     Returns:
         list[AgentEvent]: 0 或多个事件
@@ -48,7 +55,7 @@ def translate_graph_update(update: dict[str, Any], emitter: AgentEventEmitter) -
         if node_name == NODE_PLANNER:
             events.extend(_translate_planner(node_output, emitter))
         elif node_name == NODE_EXECUTOR:
-            events.extend(_translate_executor(node_output, emitter))
+            events.extend(_translate_executor(node_output, emitter, steps_done_base=steps_done_base))
         elif node_name == NODE_REPLANNER:
             events.extend(_translate_replanner(node_output, emitter))
     return events
@@ -62,6 +69,9 @@ def _translate_planner(state: dict | None, emitter: AgentEventEmitter) -> list[A
     payload: dict[str, Any] = {
         "plan": state.get("plan", []),
     }
+    # P3：结构化计划透传（事件层只增不改）
+    if state.get("plan_structured"):
+        payload["plan_structured"] = state["plan_structured"]
     # 与旧 _format_planner_event 一致：仅在有内容时附带上下文字段
     if state.get("kg_context"):
         payload["kg_context"] = state["kg_context"]
@@ -79,7 +89,12 @@ def _translate_planner(state: dict | None, emitter: AgentEventEmitter) -> list[A
     ]
 
 
-def _translate_executor(state: dict | None, emitter: AgentEventEmitter) -> list[AgentEvent]:
+def _translate_executor(
+    state: dict | None,
+    emitter: AgentEventEmitter,
+    *,
+    steps_done_base: int = 0,
+) -> list[AgentEvent]:
     """executor 输出 → STEP_END（有已完成步骤）或 STEP_START（开始执行）"""
     if not state:
         return [emitter.emit(EventType.STEP_START, stage="executor", message="执行节点运行中")]
@@ -95,7 +110,8 @@ def _translate_executor(state: dict | None, emitter: AgentEventEmitter) -> list[
                 EventType.STEP_END,
                 current_step=last_step,
                 result_preview=result_text[:_STEP_PREVIEW_CHARS],
-                steps_done=len(past_steps),
+                # 节点增量只含本次步骤；进度须叠加此前累计
+                steps_done=steps_done_base + len(past_steps),
                 remaining_steps=len(plan),
             )
         ]
@@ -182,9 +198,20 @@ class PlanExecuteRuntime(AgentRuntime):
         logger.info(f"[会话 {session_id}] 开始执行任务: {task}")
 
         try:
+            # 跨运行残留清理：past_steps/diagnosis_events/error_context 是
+            # operator.add 追加通道，检查点若残留上一任务的增量，会被
+            # initial_state 的空列表「追加」而非覆盖，导致同 session 第二个
+            # 任务带着旧历史跑（误触发强制 respond/循环检测）。每次 run 前
+            # 清掉该会话线程，任务级状态只属于本次运行。
+            try:
+                self.checkpointer.delete_thread(session_id)
+            except Exception as e:  # noqa: BLE001 - 清理失败不阻断执行
+                logger.warning(f"清空会话检查点失败（忽略）: {e}")
+
             initial_state: PlanExecuteState = {
                 "input": task,
                 "plan": [],
+                "plan_structured": [],
                 "past_steps": [],
                 "response": "",
                 "kg_context": "",
@@ -197,14 +224,20 @@ class PlanExecuteRuntime(AgentRuntime):
             config_dict = {"configurable": {"thread_id": session_id}}
 
             timed_out = False
+            steps_done_total = 0  # 跨 chunk 累计的已完成步骤数（STEP_END 进度）
             try:
                 async with asyncio.timeout(config.workflow_timeout_seconds):
                     async for update in self.graph.astream(
                         input=initial_state, config=config_dict, stream_mode="updates"
                     ):
-                        for event in translate_graph_update(update, emitter):
+                        for event in translate_graph_update(
+                            update, emitter, steps_done_base=steps_done_total
+                        ):
                             logger.debug(f"[会话 {session_id}] 事件 #{event.seq}: {event.type}")
                             yield event
+                        steps_done_total += len(
+                            (update.get(NODE_EXECUTOR) or {}).get("past_steps", []) or []
+                        )
             except TimeoutError:
                 timed_out = True
                 logger.warning(

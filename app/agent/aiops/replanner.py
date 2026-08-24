@@ -234,25 +234,39 @@ async def replanner(state: PlanExecuteState) -> dict[str, Any]:
                 return await _generate_response(state, llm)
 
             elif action == "replan":
-                # ⚠️ 强制限制：新步骤数不能超过当前剩余步骤数
-                if len(new_steps) > len(plan):
+                # 先清洗空白项（provider 结构化输出偶发空串），再限制数量——
+                # 截断必须作用于清洗后的真实步骤
+                cleaned = [s for s in new_steps if str(s).strip()]
+                if len(cleaned) > len(plan):
                     logger.warning(
-                        f"新步骤数 {len(new_steps)} > 剩余步骤数 {len(plan)}，"
+                        f"新步骤数 {len(cleaned)} > 剩余步骤数 {len(plan)}，"
                         f"强制截断为 {len(plan)} 个步骤"
                     )
-                    new_steps = new_steps[: len(plan)]
+                    cleaned = cleaned[: len(plan)]
 
                 # ⚠️ 二次检查：如果已执行步骤 >= 5，禁止 replan
                 if len(past_steps) >= 5:
                     logger.warning(f"已执行 {len(past_steps)} 个步骤，禁止重新规划，强制生成响应")
                     return await _generate_response(state, llm)
 
-                logger.info(f"决定调整计划，新步骤数量: {len(new_steps)}")
-                if new_steps:
-                    # 替换剩余计划
-                    return {"plan": new_steps}
+                logger.info(f"决定调整计划，新步骤数量: {len(cleaned)}")
+                if cleaned:
+                    # 替换剩余计划；两列视图同源于同一份 parse_plan 结果
+                    # （行模式解析——replan 输出为扁平字符串，不强行绑定工具，
+                    # 避免错位执行）。若直接写原始 new_steps 会与过滤后的
+                    # plan_structured 数量错位，破坏逐位置对齐不变量。
+                    from app.models.plan import parse_plan
+
+                    rebuilt = parse_plan(cleaned)
+                    if not rebuilt.steps:
+                        logger.warning("replan 步骤经解析后为空，继续执行原计划")
+                        return {}
+                    return {
+                        "plan": rebuilt.legacy_strings,
+                        "plan_structured": [s.model_dump() for s in rebuilt.steps],
+                    }
                 else:
-                    logger.warning("replan 但未提供新步骤，继续执行原计划")
+                    logger.warning("replan 但未提供有效新步骤，继续执行原计划")
                     return {}
 
             else:  # action == "continue"

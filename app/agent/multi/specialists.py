@@ -11,6 +11,7 @@ from app.agent.mcp_client import get_mcp_tools
 from app.config import config
 from app.core.llm_factory import LLMFactory
 from app.tools import predict_alert_cascade, query_alert_graph, retrieve_knowledge
+from app.tools.filters import tools_for_role
 
 
 class BaseSpecialistAgent:
@@ -52,11 +53,9 @@ class LogAnalystAgent(BaseSpecialistAgent):
 
     async def analyze(self, alert_input: str) -> str:
         try:
-            # 获取 MCP 工具（日志查询，短 TTL 缓存）
+            # 获取 MCP 工具（短 TTL 缓存），按角色过滤（单一事实源见 tools/filters.py）
             mcp_tools = await get_mcp_tools()
-
-            # 找到日志相关工具
-            log_tools = [t for t in mcp_tools if "log" in t.name.lower() or "cls" in t.name.lower()]
+            log_tools = tools_for_role(mcp_tools, self.name)
 
             if log_tools:
                 llm_with_tools = self.llm.bind_tools(log_tools)
@@ -117,13 +116,9 @@ class MetricInspectorAgent(BaseSpecialistAgent):
 
     async def analyze(self, alert_input: str) -> str:
         try:
-            # 获取 MCP 工具（短 TTL 缓存）
+            # 获取 MCP 工具（短 TTL 缓存），按角色过滤（单一事实源见 tools/filters.py）
             mcp_tools = await get_mcp_tools()
-
-            # 找到指标相关工具
-            metric_tools = [
-                t for t in mcp_tools if "metric" in t.name.lower() or "monitor" in t.name.lower()
-            ]
+            metric_tools = tools_for_role(mcp_tools, self.name)
 
             if metric_tools:
                 llm_with_tools = self.llm.bind_tools(metric_tools)
@@ -183,7 +178,9 @@ class KnowledgeRetrieverAgent(BaseSpecialistAgent):
 
     async def analyze(self, alert_input: str) -> str:
         try:
-            local_tools = [query_alert_graph, predict_alert_cascade, retrieve_knowledge]
+            # 本地知识工具按角色过滤（与 MCP 工具同一事实源）
+            all_local = [query_alert_graph, predict_alert_cascade, retrieve_knowledge]
+            local_tools = tools_for_role(all_local, self.name)
             llm_with_tools = self.llm.bind_tools(local_tools)
 
             messages = [

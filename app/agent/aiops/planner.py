@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from app.agent.mcp_client import get_mcp_tools
 from app.config import config
 from app.core.llm_factory import LLMFactory
+from app.models.plan import StructuredPlan, looks_like_plan, parse_plan
 from app.services.context_assembler import context_assembler
 from app.services.knowledge_graph_service import knowledge_graph_service
 from app.services.query_router import query_router
@@ -31,7 +32,7 @@ from .utils import format_tools_description
 
 
 class Plan(BaseModel):
-    """计划的输出格式"""
+    """计划的回退输出格式（扁平字符串列表——结构化输出失败时的双保险）"""
 
     steps: list[str] = Field(
         description="完成任务所需的不同步骤。这些步骤应该按顺序执行，每一步都建立在前一步的基础上。"
@@ -84,6 +85,32 @@ planner_prompt = ChatPromptTemplate.from_messages(
         ("placeholder", "{messages}"),
     ]
 )
+
+
+async def _plan_structured(llm, chain_input: dict[str, Any]) -> StructuredPlan:
+    """结构化规划：优先 StructuredPlan 输出；失败回退扁平 List[str] 再容错包装
+
+    双保险依据：嵌套 JSON 的结构化输出对模型稳定性要求高，
+    扁平字符串列表几乎总能成功，parse_plan 保证旧形态永远可表示。
+    """
+    try:
+        structured_chain = planner_prompt | llm.with_structured_output(StructuredPlan)
+        result = await structured_chain.ainvoke(chain_input)
+        if not looks_like_plan(result):
+            # provider 返回异常对象等非计划形态：视为结构化失败走回退，
+            # 而非被容错解析当成一行文本步骤（那会掩盖上游故障）
+            raise TypeError(f"意外的结构化输出类型: {type(result).__name__}")
+        plan = result if isinstance(result, StructuredPlan) else parse_plan(result)
+        if not plan.steps:
+            raise ValueError("结构化输出为空计划")
+        return plan
+    except Exception as structured_err:
+        logger.warning(f"结构化规划失败（{structured_err}），回退扁平列表模式")
+
+    fallback_chain = planner_prompt | llm.with_structured_output(Plan)
+    legacy = await fallback_chain.ainvoke(chain_input)
+    steps = legacy.steps if isinstance(legacy, Plan) else legacy.get("steps", [])
+    return parse_plan(steps)
 
 
 async def planner(state: PlanExecuteState) -> dict[str, Any]:
@@ -202,34 +229,26 @@ async def planner(state: PlanExecuteState) -> dict[str, Any]:
         except Exception as e:
             logger.warning(f"记忆召回失败（忽略）: {e}")
 
-        # 步骤4: 创建 LLM 并生成计划
+        # 步骤4: 创建 LLM 并生成结构化计划（P3）
         llm = LLMFactory.create_chat_model(
             model=config.rag_model,
             temperature=0,
             streaming=False,
         )
 
-        planner_chain = planner_prompt | llm.with_structured_output(Plan)
+        chain_input = {
+            "messages": [("user", input_text)],
+            "tools_description": tools_description,
+            "experience_context": experience_context,
+        }
 
-        # 调用 LLM 生成计划
-        plan_result = await planner_chain.ainvoke(
-            {
-                "messages": [("user", input_text)],
-                "tools_description": tools_description,
-                "experience_context": experience_context,
-            }
-        )
+        structured = await _plan_structured(llm, chain_input)
+        plan_steps = structured.legacy_strings
 
-        # 提取步骤列表
-        if isinstance(plan_result, Plan):
-            plan_steps = plan_result.steps
-        else:
-            # 如果返回的是字典，提取 steps 字段
-            plan_steps = plan_result.get("steps", [])
-
-        logger.info(f"计划已生成，共 {len(plan_steps)} 个步骤")
-        for i, step in enumerate(plan_steps, 1):
-            logger.info(f"  步骤{i}: {step}")
+        logger.info(f"计划已生成（{structured.source_format}），共 {len(plan_steps)} 个步骤")
+        for i, step in enumerate(structured.steps, 1):
+            tool_tag = f" [tool={step.tool}]" if step.tool else ""
+            logger.info(f"  步骤{i}{tool_tag}: {step.description}")
 
         # 构建诊断事件
         events = []
@@ -268,6 +287,7 @@ async def planner(state: PlanExecuteState) -> dict[str, Any]:
 
         return {
             "plan": plan_steps,
+            "plan_structured": [step.model_dump() for step in structured.steps],
             "kg_context": kg_context,
             "query_intent": intent,
             "diagnosis_events": events,
@@ -278,6 +298,8 @@ async def planner(state: PlanExecuteState) -> dict[str, Any]:
         # 返回一个默认计划
         return {
             "plan": ["收集相关信息", "分析数据", "生成报告"],
+            # 兜底计划为纯文本步骤：显式清空结构化视图，维持逐位置对齐不变量
+            "plan_structured": [],
             "diagnosis_events": [
                 {
                     "timestamp": time.time(),

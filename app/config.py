@@ -29,6 +29,18 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 9900
 
+    # 安全配置（P3）
+    auth_enabled: bool = False  # X-API-Key 静态密钥鉴权；默认关（本地开发零负担）
+    auth_api_key: str = ""  # 鉴权密钥；enabled 时必须非空，仅从 .env 注入
+    cors_allow_origins: list[str] = Field(default_factory=lambda: ["*"])
+    # 通配 origin 与 credentials 是无效组合（浏览器规范禁止），引擎层强制互斥；
+    # 显式域名列表时可安全开启
+    cors_allow_credentials: bool = False
+
+    # 待审动作（P3 高风险工具确认门）
+    pending_actions_db_path: str = "data/pending_actions.db"  # sqlite 存储路径
+    pending_action_ttl_seconds: float = 900.0  # 待审动作过期时间（15 分钟）
+
     # OpenRouter 配置（OpenAI 兼容模式）
     openrouter_api_key: str = ""  # 默认空字符串，实际使用需从环境变量 OPENROUTER_API_KEY 加载
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
