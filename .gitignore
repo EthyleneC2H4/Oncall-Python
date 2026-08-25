@@ -82,11 +82,6 @@ dmypy.json
 # Ruff
 .ruff_cache/
 
-# uv lock
-uv.lock
-
-# Knowledge graph data
-kg_data.json
-
+# uv.lock 已入库：Docker 构建依赖 uv sync --frozen 锁定版本（应用类项目应追踪锁文件）
 # Eval run artifacts (timestamped reports; datasets stay tracked)
 eval/results/

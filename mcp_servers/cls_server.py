@@ -467,4 +467,12 @@ def search_log(
 
 
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http", host="127.0.0.1", port=8003, path="/mcp")
+    # 监听地址可被环境覆盖（MCP_HOST/MCP_PORT），容器部署时绑 0.0.0.0
+    import os
+
+    mcp.run(
+        transport="streamable-http",
+        host=os.environ.get("MCP_HOST", "127.0.0.1"),
+        port=int(os.environ.get("MCP_PORT", "8003")),
+        path="/mcp",
+    )

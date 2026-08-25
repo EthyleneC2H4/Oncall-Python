@@ -140,6 +140,31 @@ make reindex-drop     # drop + rebuild (required after changing embedding model)
 
 Foreground development: `make dev` (uvicorn --reload). Windows: `start-windows.bat`.
 
+### Docker one-command deploy
+
+Prefer not to set up a Python environment? Bring up everything with Docker Compose.
+Dependency versions are pinned by the committed `uv.lock` via `uv sync --frozen`
+(reproducible builds):
+
+```bash
+cp .env.example .env  # then set OPENROUTER_API_KEY
+
+docker compose up -d                    # minimal stack: app only (degrades gracefully)
+docker compose --profile milvus up -d   # + Milvus stack (etcd/MinIO/standalone)
+docker compose --profile mcp up -d      # + CLS(:8003)/Monitor(:8004) MCP tool servers
+```
+
+Then open http://localhost:9900. First start downloads the BGE model into the
+`hf-cache` volume (~1-2 GB, offline afterwards). Disabled components fall back
+through the degradation ladder without blocking startup. Data lives in named
+volumes: `app-data` (sqlite), `app-uploads`, `app-logs`, `hf-cache`.
+
+Rebuild the vector index (inside the container):
+
+```bash
+docker compose exec app python scripts/reindex_vector_store.py
+```
+
 ### Make targets
 
 | Target | Purpose |

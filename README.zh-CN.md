@@ -140,6 +140,29 @@ make reindex-drop     # 删集合重建（更换 embedding 模型后必选）
 
 前台开发模式：`make dev`（uvicorn --reload）。Windows：`start-windows.bat`。
 
+### Docker 一键部署
+
+不想装 Python 环境时，用 Docker Compose 一条命令拉起整套服务。依赖版本由入库的
+`uv.lock` 经 `uv sync --frozen` 锁定，构建可复现：
+
+```bash
+cp .env.example .env  # 设置 OPENROUTER_API_KEY
+
+docker compose up -d                    # 最小栈：应用本体（无 Milvus/MCP，自动降级）
+docker compose --profile milvus up -d   # + Milvus 全栈（etcd/MinIO/standalone）
+docker compose --profile mcp up -d      # + CLS(:8003)/Monitor(:8004) MCP 工具服务
+```
+
+打开 http://localhost:9900 即可使用；首次启动会在 `hf-cache` 卷中下载 BGE 模型
+（约 1-2 GB，之后离线可用）。未启用的可选组件按降级阶梯处理，不阻塞启动。
+数据落盘在命名卷：`app-data`（sqlite）、`app-uploads`（上传文档）、`app-logs`、`hf-cache`。
+
+重建向量索引（容器内执行）：
+
+```bash
+docker compose exec app python scripts/reindex_vector_store.py
+```
+
 ### Make 目标
 
 | 目标 | 用途 |

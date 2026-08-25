@@ -1,0 +1,135 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Oncall-Python 一键部署
+#
+#   cp .env.example .env      # 填入 OPENROUTER_API_KEY
+#   docker compose up -d                          # 最小栈（应用本体，降级运行）
+#   docker compose --profile milvus up -d         # + Milvus 向量库全栈
+#   docker compose --profile mcp up -d            # + CLS/Monitor MCP 工具服务
+#
+# 未启用对应 profile 时，app 对 Milvus/MCP 的连接失败按既有降级阶梯处理，
+# 不阻塞启动。首次启动会下载 BGE 模型（约 1-2GB，落在 hf-cache 卷）。
+# ─────────────────────────────────────────────────────────────────────────────
+name: oncall-python
+
+services:
+  app:
+    build: .
+    image: oncall-python:latest
+    ports:
+      - "${APP_PORT:-9900}:9900"
+    env_file:
+      # 缺失不报错（compose ≥ v2.24）：本地开发可先无 .env 起容器看界面
+      - path: .env
+        required: false
+    environment:
+      # 服务发现默认指向 compose 网络内服务名；同名真实环境变量可覆盖。
+      # 注意：项目根的 .env 也会参与此插值——若其中显式设了 localhost 值会覆盖这里的默认。
+      MILVUS_HOST: ${MILVUS_HOST:-standalone}
+      MCP_CLS_URL: ${MCP_CLS_URL:-http://mcp-cls:8003/mcp}
+      MCP_MONITOR_URL: ${MCP_MONITOR_URL:-http://mcp-monitor:8004/mcp}
+    volumes:
+      - app-data:/app/data            # sqlite（记忆/待审动作/缓存）
+      - app-logs:/app/logs
+      - app-uploads:/app/uploads      # 知识文档上传目录
+      - hf-cache:/app/.cache/huggingface
+    depends_on:
+      # required:false：对应 profile 未启用时不等待、不报错
+      standalone:
+        condition: service_healthy
+        required: false
+      mcp-cls:
+        condition: service_started
+        required: false
+      mcp-monitor:
+        condition: service_started
+        required: false
+    restart: unless-stopped
+
+  # ── 可选：MCP 工具服务（--profile mcp） ────────────────────────────────────
+  mcp-cls:
+    build: .
+    profiles: ["mcp"]
+    command: ["python", "mcp_servers/cls_server.py"]
+    environment:
+      MCP_HOST: 0.0.0.0
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket;socket.create_connection(('127.0.0.1',8003),3).close()"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+    restart: unless-stopped
+
+  mcp-monitor:
+    build: .
+    profiles: ["mcp"]
+    command: ["python", "mcp_servers/monitor_server.py"]
+    environment:
+      MCP_HOST: 0.0.0.0
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket;socket.create_connection(('127.0.0.1',8004),3).close()"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+    restart: unless-stopped
+
+  # ── 可选：Milvus 向量库全栈（--profile milvus；取自 vector-database.yml） ──
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.18
+    profiles: ["milvus"]
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/etcd:/etcd
+    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    profiles: ["milvus"]
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/minio:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
+  standalone:
+    image: milvusdb/milvus:v2.5.10
+    profiles: ["milvus"]
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/milvus:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+volumes:
+  app-data:
+  app-logs:
+  app-uploads:
+  hf-cache:
