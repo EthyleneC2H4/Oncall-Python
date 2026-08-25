@@ -40,7 +40,7 @@ def setup_logger():
         encoding="utf-8",  # 解决中文乱码
         enqueue=True,  # 异步写入，提升性能（避免IO阻塞）
         backtrace=True,  # 显示完整异常栈信息
-        diagnose=True,  # 显示变量值，便于调试
+        diagnose=config.debug,  # 变量值仅在 debug 展开：diagnose 会把局部变量插进日志文件，生产开启有敏感信息泄露风险
         level="INFO",
         format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {module}.{function}:{line} | {message}",
     )

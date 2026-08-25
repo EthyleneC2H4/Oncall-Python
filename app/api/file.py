@@ -16,6 +16,10 @@ UPLOAD_DIR = Path("./uploads")
 ALLOWED_EXTENSIONS = ["txt", "md"]
 # 单个文件支持最大大小
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+# index_directory 允许的根目录白名单：客户端传入的路径 resolve 后必须落在
+# 其中之一。否则本机任意可读 .txt/.md（如 ~/Documents）都会被索引进向量库、
+# 成为对话可检索内容——等于开放一个本地文件外泄面。
+INDEX_ALLOWED_ROOTS = [Path("./uploads"), Path("./aiops-docs")]
 
 
 @router.post("/upload")
@@ -105,12 +109,29 @@ async def index_directory(directory_path: str | None = None):
     索引指定目录下的所有文件
 
     Args:
-        directory_path: 目录路径（可选，默认使用 uploads 目录）
+        directory_path: 目录路径（可选，默认使用 uploads 目录；
+            仅允许白名单根目录 uploads/ 与 aiops-docs/ 之内的路径）
 
     Returns:
         JSONResponse: 索引结果
     """
     try:
+        # 白名单校验：resolve 后必须是允许根目录本身或其子目录
+        if directory_path is not None:
+            target = Path(directory_path).resolve()
+            allowed = any(
+                target == root.resolve() or target.is_relative_to(root.resolve())
+                for root in INDEX_ALLOWED_ROOTS
+            )
+            if not allowed:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"directory_path 仅允许项目 uploads/ 或 aiops-docs/ 目录，"
+                        f"收到: {directory_path}"
+                    ),
+                )
+
         logger.info(f"开始索引目录: {directory_path or 'uploads'}")
 
         # 执行索引
@@ -125,6 +146,8 @@ async def index_directory(directory_path: str | None = None):
             },
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"索引目录失败: {e}")
         raise HTTPException(status_code=500, detail=f"索引目录失败: {e}") from e

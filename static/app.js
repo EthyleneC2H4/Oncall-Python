@@ -61,19 +61,28 @@ class SuperBizAgentApp {
     // 安全地渲染 Markdown
     renderMarkdown(content) {
         if (!content) return '';
-        
+
+        const fallback = () => this.escapeHtml(content);
+
         // 检查 marked 是否可用
         if (typeof marked === 'undefined') {
             console.warn('marked 库未加载，使用纯文本显示');
-            return this.escapeHtml(content);
+            return fallback();
         }
-        
+
         try {
             const html = marked.parse(content);
-            return html;
+            // 净化是必须环节而非可选优化：知识库/KG 内容可被投毒携带 HTML 载荷，
+            // 未净化直接 innerHTML 即存储型 XSS（且执行点在审批 UI 所在页面）。
+            // DOMPurify 缺失时宁可降级为纯文本，也不放行未净化 HTML。
+            if (typeof DOMPurify === 'undefined' || !DOMPurify.isSupported) {
+                console.warn('DOMPurify 不可用，降级为纯文本显示');
+                return fallback();
+            }
+            return DOMPurify.sanitize(html);
         } catch (e) {
             console.error('Markdown 渲染失败:', e);
-            return this.escapeHtml(content);
+            return fallback();
         }
     }
 
@@ -1845,20 +1854,24 @@ class SuperBizAgentApp {
         const panel = document.getElementById('kgAnalysis');
         if (!panel) return;
 
+        // 图谱节点/边的 label、reason 等字段源自可被投毒的文档与 KG 内容，
+        // 插值进 innerHTML 前一律转义
+        const esc = (v) => this.escapeHtml(String(v ?? ''));
+
         if (analysis.error) {
-            panel.innerHTML = `<p style="color:#999">${analysis.error}</p>`;
+            panel.innerHTML = `<p style="color:#999">${esc(analysis.error)}</p>`;
             panel.classList.add('active');
             return;
         }
 
-        let html = `<h4 style="margin-bottom:8px;">📊 ${analysis.label}（${analysis.level}）</h4>`;
+        let html = `<h4 style="margin-bottom:8px;">📊 ${esc(analysis.label)}（${esc(analysis.level)}）</h4>`;
 
         if (analysis.root_causes && analysis.root_causes.length > 0) {
             html += '<p style="font-weight:600;margin:8px 0 4px;">可能的根因：</p><ul style="margin:0 0 8px 20px;">';
             analysis.root_causes.forEach(c => {
-                html += `<li><strong>${c.label}</strong>（${c.category}）`;
+                html += `<li><strong>${esc(c.label)}</strong>（${esc(c.category)}）`;
                 if (c.actions && c.actions.length > 0) {
-                    html += ' → ' + c.actions.map(a => a.label).join('、');
+                    html += ' → ' + c.actions.map(a => esc(a.label)).join('、');
                 }
                 html += '</li>';
             });
@@ -1868,7 +1881,7 @@ class SuperBizAgentApp {
         if (analysis.cascade_chain && analysis.cascade_chain.length > 0) {
             html += '<p style="font-weight:600;margin:8px 0 4px;">⚠️ 级联风险：</p><ul style="margin:0 0 8px 20px;">';
             analysis.cascade_chain.forEach(c => {
-                html += `<li>${'→'.repeat(c.depth)} <strong>${c.to_label}</strong>: ${c.reason}</li>`;
+                html += `<li>${'→'.repeat(c.depth)} <strong>${esc(c.to_label)}</strong>: ${esc(c.reason)}</li>`;
             });
             html += '</ul>';
         }
@@ -1877,7 +1890,7 @@ class SuperBizAgentApp {
             const urgencyIcon = { immediate: '🔴', short_term: '🟡', long_term: '🟢' };
             html += '<p style="font-weight:600;margin:8px 0 4px;">推荐处置（按紧急度）：</p><ul style="margin:0 0 0 20px;">';
             analysis.recommended_actions.forEach(a => {
-                html += `<li>${urgencyIcon[a.urgency] || '⚪'} ${a.label}</li>`;
+                html += `<li>${urgencyIcon[a.urgency] || '⚪'} ${esc(a.label)}</li>`;
             });
             html += '</ul>';
         }

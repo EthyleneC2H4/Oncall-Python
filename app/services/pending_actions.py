@@ -146,13 +146,19 @@ class PendingActionStore:
 
         返回转移后的最新记录；前置状态不符（含已被并发方抢先）返回 None。
         sqlite 单条条件 UPDATE 保证并发下的恰好一次语义。
+        以 PENDING 为起点的转移额外带 TTL 条件：过期动作不允许被裁决，
+        否则 15 分钟审批窗口只要没人调过 list_pending 就能无限延长。
         """
         with self._lock:
-            cur = self._conn.execute(
+            sql = (
                 "UPDATE pending_actions SET status = ?, decided_at = ? "
-                "WHERE action_id = ? AND status = ?",
-                (to_status.value, time.time(), action_id, from_status.value),
+                "WHERE action_id = ? AND status = ?"
             )
+            params: list[Any] = [to_status.value, time.time(), action_id, from_status.value]
+            if from_status is ActionStatus.PENDING:
+                sql += " AND created_at >= ?"
+                params.append(time.time() - self.ttl_seconds)
+            cur = self._conn.execute(sql, params)
             self._conn.commit()
             if not cur.rowcount:
                 return None

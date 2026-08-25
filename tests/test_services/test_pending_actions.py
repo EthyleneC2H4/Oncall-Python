@@ -156,7 +156,9 @@ class TestAtomicTransition:
         action = store.propose(tool_name="restart_instance")
 
         # pending → approved 不存在，认领失败
-        assert store.transition(action.action_id, ActionStatus.APPROVED, ActionStatus.EXECUTED) is None
+        assert (
+            store.transition(action.action_id, ActionStatus.APPROVED, ActionStatus.EXECUTED) is None
+        )
         assert store.get(action.action_id).status is ActionStatus.PENDING
 
     def test_approved_to_executed_exactly_once(self, store):
@@ -176,6 +178,50 @@ class TestAtomicTransition:
         store.transition(action.action_id, ActionStatus.APPROVED, ActionStatus.EXECUTED)
 
         # executed 终态：任何来源的状态迁移都不再命中
-        assert store.transition(action.action_id, ActionStatus.APPROVED, ActionStatus.REJECTED) is None
-        assert store.transition(action.action_id, ActionStatus.PENDING, ActionStatus.APPROVED) is None
+        assert (
+            store.transition(action.action_id, ActionStatus.APPROVED, ActionStatus.REJECTED) is None
+        )
+        assert (
+            store.transition(action.action_id, ActionStatus.PENDING, ActionStatus.APPROVED) is None
+        )
         assert store.get(action.action_id).status is ActionStatus.EXECUTED
+
+
+class TestTtlEnforcedOnDecision:
+    """TTL 必须在裁决路径强制执行，而非只在读取时惰性判定：
+
+    此前 decide→transition 的 UPDATE 不带 created_at 条件——只要没人调过
+    list_pending 触发清理，过期动作照样能被批准并补执行（审批窗口可无限延长）。
+    """
+
+    def test_expired_action_cannot_be_approved(self, store):
+        action = store.propose(tool_name="restart_instance")
+        _backdate(store, action.action_id, seconds=store.ttl_seconds + 60)
+
+        decided = store.decide(action.action_id, ActionStatus.APPROVED)
+        assert decided.status is not ActionStatus.APPROVED
+        # 惰性判定把过期动作标为 expired，绝不进入可执行状态
+        assert decided.status is ActionStatus.EXPIRED
+
+    def test_expired_action_cannot_transition_directly(self, store):
+        action = store.propose(tool_name="restart_instance")
+        _backdate(store, action.action_id, seconds=store.ttl_seconds + 60)
+
+        assert (
+            store.transition(action.action_id, ActionStatus.PENDING, ActionStatus.APPROVED) is None
+        )
+        assert store.get(action.action_id).status is ActionStatus.EXPIRED
+
+    def test_fresh_action_still_decidable(self, store):
+        """正向对照：窗口内裁决不受 TTL 收紧影响"""
+        action = store.propose(tool_name="scale_out")
+        assert store.decide(action.action_id, ActionStatus.APPROVED).status is ActionStatus.APPROVED
+
+    def test_execute_claim_not_ttl_gated(self, store):
+        """approved→executed 的补执行认领不适用 TTL 条件（裁决发生在窗口内即可）"""
+        action = store.propose(tool_name="restart_instance")
+        store.decide(action.action_id, ActionStatus.APPROVED)
+        _backdate(store, action.action_id, seconds=store.ttl_seconds + 60)
+
+        claimed = store.transition(action.action_id, ActionStatus.APPROVED, ActionStatus.EXECUTED)
+        assert claimed is not None and claimed.status is ActionStatus.EXECUTED

@@ -14,6 +14,9 @@ class InputGuard:
     """输入安全检测器"""
 
     # Prompt 注入检测规则（中英文）
+    # 注意：这是启发式而非硬边界——单词级裸模式（如裸 "override"、"system:"）
+    # 会误杀正常运维问题（"how do I override a liveness probe"）与含配置片段的
+    # 文档，因此英文结构词一律要求邻近出现指令动词才算命中。
     INJECTION_PATTERNS = [
         r"忽略.*(?:前面|之前|上面).*(?:指令|提示|内容)",
         r"你现在是",
@@ -22,7 +25,6 @@ class InputGuard:
         r"系统提示词.{0,8}(?:修改|篡改|覆盖|重写)",
         r"不受.{0,4}(?:限制|约束)",
         r"越狱",
-        r"system\s*:",
         r"<\s*system\s*>",
         r"ignore\s+(?:all\s+)?(?:previous|above)\s+instructions?",
         r"you\s+are\s+now",
@@ -32,8 +34,11 @@ class InputGuard:
         r"developer\s+mode",
         r"jailbreak",
         r"DAN\s+mode",
-        r"\[SYSTEM\]",
-        r"OVERRIDE",
+        # 以下三类曾是无上下文的裸词（OVERRIDE / system: / [SYSTEM]），
+        # 现要求同一行内邻近出现指令动词，兼顾检出与运维语料的可用性
+        r"(?:override|overwrite)[^\n]{0,50}?(?:instructions?|system\s*prompt|safety\s*guardrails?)",
+        r"system\s*:\s*[^\n]{0,60}?\b(?:ignore|disregard|forget|reveal|bypass)\b",
+        r"\[\s*system\s*\][^\n]{0,60}?\b(?:ignore|disregard|begin|new\s+instructions?|activated?)\b",
     ]
 
     # PII 检测正则
