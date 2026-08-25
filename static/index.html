@@ -46,6 +46,14 @@
 
         <!-- 主内容区域 -->
         <main class="main-content">
+            <button class="kg-top-btn" id="approvalsBtn" title="待审批动作">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 3L4.5 6V11C4.5 15.9 7.6 20.1 12 21C16.4 20.1 19.5 15.9 19.5 11V6L12 3Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                    <path d="M9 12L11 14L15 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span>审批</span>
+                <span class="approvals-badge" id="approvalsBadge" style="display:none;">0</span>
+            </button>
             <button class="kg-top-btn" id="kgSidebarBtn" title="知识图谱">
                 <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <circle cx="12" cy="5" r="3" stroke="currentColor" stroke-width="2"/>
@@ -169,6 +177,25 @@
                 <span><i style="background:#3498db"></i> 工具</span>
                 <span style="margin-left:16px;">—— 因果/处置</span>
                 <span>- - - 级联/使用</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 高风险动作审批面板（C1）：复用 kg-modal 样式族 -->
+    <div id="approvalsModal" class="kg-modal" style="display:none;">
+        <div class="kg-modal-content approvals-modal-content">
+            <div class="kg-modal-header">
+                <h3>高风险动作审批</h3>
+                <div class="kg-modal-controls">
+                    <button class="kg-close-btn" id="approvalsCloseBtn">&times;</button>
+                </div>
+            </div>
+            <div class="kg-modal-body">
+                <p class="approvals-hint">
+                    以下动作由 Agent 发起、因风险等级被拦截，需人工裁决。
+                    超时未裁决的动作将自动失效（TTL 倒计时见各卡片）。
+                </p>
+                <div id="pendingActionsList" class="pending-actions-list"></div>
             </div>
         </div>
     </div>

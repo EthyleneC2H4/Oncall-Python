@@ -15,6 +15,7 @@ class SuperBizAgentApp {
         this.initMarkdown();
         this.checkAndSetCentered();
         this.renderChatHistory();
+        this.refreshPendingCount(); // 待审批角标（尽力而为）
     }
 
     // 初始化Markdown配置
@@ -133,6 +134,14 @@ class SuperBizAgentApp {
         this.kgAlertFilter = document.getElementById('kgAlertFilter');
         this.kgNetwork = null; // vis-network 实例
 
+        // 高风险动作审批（C1）
+        this.approvalsBtn = document.getElementById('approvalsBtn');
+        this.approvalsModal = document.getElementById('approvalsModal');
+        this.approvalsCloseBtn = document.getElementById('approvalsCloseBtn');
+        this.pendingActionsList = document.getElementById('pendingActionsList');
+        this.approvalsBadge = document.getElementById('approvalsBadge');
+        this._approvalsTimer = null; // 倒计时刷新句柄（面板关闭时清理）
+
         // 初始化时检查是否需要居中
         this.checkAndSetCentered();
     }
@@ -163,6 +172,19 @@ class SuperBizAgentApp {
         }
         if (this.kgAlertFilter) {
             this.kgAlertFilter.addEventListener('change', (e) => this.filterKGGraph(e.target.value));
+        }
+
+        // 审批面板按钮
+        if (this.approvalsBtn) {
+            this.approvalsBtn.addEventListener('click', () => this.openApprovalsModal());
+        }
+        if (this.approvalsCloseBtn) {
+            this.approvalsCloseBtn.addEventListener('click', () => this.closeApprovalsModal());
+        }
+        if (this.approvalsModal) {
+            this.approvalsModal.addEventListener('click', (e) => {
+                if (e.target === this.approvalsModal) this.closeApprovalsModal();
+            });
         }
         
         // 模式选择下拉菜单
@@ -1901,6 +1923,159 @@ class SuperBizAgentApp {
 
     async filterKGGraph(alertKeyword) {
         await this.loadKGGraph(alertKeyword);
+    }
+
+    // ========== 高风险动作审批（C1） ==========
+
+    async openApprovalsModal() {
+        if (!this.approvalsModal) return;
+        this.approvalsModal.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+        await this.loadPendingActions();
+        // 面板打开期间每秒本地倒计时 + 每 30s 拉一次服务端列表
+        this._approvalsTimer = setInterval(async () => {
+            this.tickApprovalsCountdown();
+            if (++this._approvalsTick % 30 === 0) await this.loadPendingActions();
+        }, 1000);
+        this._approvalsTick = 0;
+    }
+
+    closeApprovalsModal() {
+        if (this.approvalsModal) this.approvalsModal.style.display = 'none';
+        document.body.style.overflow = '';
+        if (this._approvalsTimer) {
+            clearInterval(this._approvalsTimer);
+            this._approvalsTimer = null;
+        }
+    }
+
+    async loadPendingActions() {
+        if (!this.pendingActionsList) return;
+        const esc = (v) => this.escapeHtml(String(v ?? ''));
+        try {
+            const resp = await fetch(`${this.apiBaseUrl}/actions/pending`);
+            const body = await resp.json();
+            const actions = (body.data && body.data.actions) || [];
+            this.updateApprovalsBadge(actions.length);
+
+            if (actions.length === 0) {
+                this.pendingActionsList.innerHTML =
+                    '<p class="approvals-empty">当前没有待审批的高风险动作。</p>';
+                return;
+            }
+
+            const now = Date.now() / 1000;
+            this.pendingActionsList.innerHTML = actions.map((a) => {
+                // TTL 倒计时：expires_at 缺省（旧后端）时不显示剩余时间
+                let ttlHtml = '';
+                if (a.expires_at) {
+                    const remain = Math.max(0, Math.floor(a.expires_at - now));
+                    const expired = remain <= 0;
+                    const mm = String(Math.floor(remain / 60)).padStart(2, '0');
+                    const ss = String(remain % 60).padStart(2, '0');
+                    ttlHtml = `<span class="approvals-ttl${expired ? ' expired' : ''}" data-expires-at="${esc(a.expires_at)}">${
+                        expired ? '已过期' : `⏳ 剩余 ${mm}:${ss}`
+                    }</span>`;
+                }
+                const argsText = JSON.stringify(a.args ?? {}, null, 2);
+                return `
+                <div class="approval-card" data-action-id="${esc(a.action_id)}">
+                    <div class="approval-card-header">
+                        <span class="approval-tool">${esc(a.tool_name)}</span>
+                        ${ttlHtml}
+                    </div>
+                    <pre class="approval-args">${esc(argsText)}</pre>
+                    <p class="approval-reason"><strong>原因：</strong>${esc(a.reason)}</p>
+                    <p class="approval-meta">会话: ${esc(a.session_id)} · 发起: ${
+                        new Date((a.created_at || 0) * 1000).toLocaleString()
+                    }</p>
+                    <div class="approval-actions">
+                        <button class="approval-btn approve" data-id="${esc(a.action_id)}">批准并执行</button>
+                        <button class="approval-btn reject" data-id="${esc(a.action_id)}">拒绝</button>
+                    </div>
+                    <div class="approval-result" id="result-${esc(a.action_id)}"></div>
+                </div>`;
+            }).join('');
+
+            // 裁决按钮（事件委托）
+            this.pendingActionsList.querySelectorAll('.approval-btn').forEach((btn) => {
+                btn.addEventListener('click', () => this.decideAction(btn.dataset.id, btn.classList.contains('approve')));
+            });
+        } catch (e) {
+            console.error('加载待审批动作失败:', e);
+            this.pendingActionsList.innerHTML =
+                `<p class="approvals-empty">加载失败: ${esc(e.message)}</p>`;
+        }
+    }
+
+    tickApprovalsCountdown() {
+        if (!this.pendingActionsList) return;
+        const now = Date.now() / 1000;
+        this.pendingActionsList.querySelectorAll('.approvals-ttl[data-expires-at]').forEach((el) => {
+            const remain = Math.max(0, Math.floor(parseFloat(el.dataset.expiresAt) - now));
+            if (remain <= 0) {
+                el.textContent = '已过期';
+                el.classList.add('expired');
+            } else {
+                const mm = String(Math.floor(remain / 60)).padStart(2, '0');
+                const ss = String(remain % 60).padStart(2, '0');
+                el.textContent = `⏳ 剩余 ${mm}:${ss}`;
+            }
+        });
+    }
+
+    async decideAction(actionId, approve) {
+        const resultEl = document.getElementById(`result-${actionId}`);
+        const esc = (v) => this.escapeHtml(String(v ?? ''));
+        try {
+            const verb = approve ? 'approve' : 'reject';
+            const resp = await fetch(`${this.apiBaseUrl}/actions/${encodeURIComponent(actionId)}/${verb}`, {
+                method: 'POST',
+            });
+            const body = await resp.json();
+            if (!resp.ok || body.code !== 200) {
+                throw new Error(body.detail || `HTTP ${resp.status}`);
+            }
+            const action = (body.data && body.data.action) || {};
+            const executed = !!(body.data && body.data.executed);
+
+            if (resultEl) {
+                let text;
+                if (approve && executed) {
+                    text = `✅ 已批准并执行。结果预览: ${esc(body.data.result_preview || '(空)')}`;
+                } else if (approve) {
+                    text = `ℹ️ 动作状态为「${esc(action.status)}」，未重复执行`;
+                } else {
+                    text = '🚫 已拒绝，该动作不会执行';
+                }
+                resultEl.textContent = text;
+                resultEl.className = 'approval-result show';
+            }
+            // 刷新列表与角标；已裁决的卡片会从 pending 列表消失，
+            // 结果文本随刷新丢失——延迟一拍让用户看到反馈
+            setTimeout(() => this.loadPendingActions(), 1500);
+        } catch (e) {
+            if (resultEl) {
+                resultEl.textContent = `❌ 操作失败: ${esc(e.message)}`;
+                resultEl.className = 'approval-result show';
+            }
+        }
+    }
+
+    updateApprovalsBadge(count) {
+        if (!this.approvalsBadge) return;
+        this.approvalsBadge.textContent = String(count);
+        this.approvalsBadge.style.display = count > 0 ? 'inline-flex' : 'none';
+    }
+
+    async refreshPendingCount() {
+        try {
+            const resp = await fetch(`${this.apiBaseUrl}/actions/pending`);
+            const body = await resp.json();
+            this.updateApprovalsBadge(((body.data || {}).actions || []).length);
+        } catch (e) {
+            /* 角标是尽力而为的观测，失败静默 */
+        }
     }
 }
 

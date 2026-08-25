@@ -162,8 +162,8 @@ async def diagnose_stream(request: AIOpsRequest):
 # ──────────────── 高风险动作审批（P3 强制确认门） ────────────────
 
 
-def _action_to_dict(action) -> dict:  # noqa: ANN001 - PendingAction 模型避免循环导入
-    return {
+def _action_to_dict(action, ttl_seconds: float | None = None) -> dict:  # noqa: ANN001 - PendingAction 模型避免循环导入
+    data = {
         "action_id": action.action_id,
         "tool_name": action.tool_name,
         "args": action.args,
@@ -174,6 +174,10 @@ def _action_to_dict(action) -> dict:  # noqa: ANN001 - PendingAction 模型避�
         "decided_at": action.decided_at,
         "result_preview": action.result_preview,
     }
+    if ttl_seconds is not None:
+        # C1 审批 UI 倒计时用：过期即裁决无效（TTL 在 decide 的 SQL 层强制）
+        data["expires_at"] = action.created_at + ttl_seconds
+    return data
 
 
 @router.get("/actions/pending")
@@ -183,7 +187,10 @@ async def list_pending_actions():
     pending = await asyncio.to_thread(store.list_pending)
     return {
         "code": 200,
-        "data": {"total": len(pending), "actions": [_action_to_dict(a) for a in pending]},
+        "data": {
+            "total": len(pending),
+            "actions": [_action_to_dict(a, store.ttl_seconds) for a in pending],
+        },
     }
 
 
@@ -201,7 +208,10 @@ async def approve_action(action_id: str):
         raise HTTPException(status_code=404, detail=f"待审动作不存在: {action_id}")
     if decided.status is not ActionStatus.APPROVED:
         # 已裁决/已过期/已执行：返回现状态，不重复执行
-        return {"code": 200, "data": {"action": _action_to_dict(decided), "executed": False}}
+        return {
+            "code": 200,
+            "data": {"action": _action_to_dict(decided, store.ttl_seconds), "executed": False},
+        }
 
     result = await execute_approved(decided)
     refreshed = await asyncio.to_thread(store.get, action_id)
@@ -211,7 +221,7 @@ async def approve_action(action_id: str):
             "executed": result.ok,
             "result_preview": (result.value if result.ok else "")[:500],
             "error": result.error if not result.ok else "",
-            "action": _action_to_dict(refreshed) if refreshed else None,
+            "action": _action_to_dict(refreshed, store.ttl_seconds) if refreshed else None,
         },
     }
 
@@ -220,7 +230,11 @@ async def approve_action(action_id: str):
 async def reject_action(action_id: str):
     """拒绝一个高风险动作（终态，不执行）"""
     logger.info(f"审批请求: reject {action_id}")
+    store = get_pending_action_store()
     decided = await asyncio.to_thread(decide_action, action_id, ActionStatus.REJECTED)
     if decided is None:
         raise HTTPException(status_code=404, detail=f"待审动作不存在: {action_id}")
-    return {"code": 200, "data": {"action": _action_to_dict(decided), "executed": False}}
+    return {
+        "code": 200,
+        "data": {"action": _action_to_dict(decided, store.ttl_seconds), "executed": False},
+    }

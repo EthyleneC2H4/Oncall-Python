@@ -40,6 +40,14 @@ class TestListPending:
         assert row["status"] == "pending"
         assert row["args"] == {"instance_id": "i-1"}
 
+    def test_list_carries_expires_at_for_countdown(self, test_app, actions_env):
+        """C1 审批 UI 的 TTL 倒计时依赖：expires_at = created_at + ttl"""
+        store = get_pending_action_store()
+        action = actions_env.propose(tool_name="scale_out")
+
+        (row,) = test_app.get("/api/actions/pending").json()["data"]["actions"]
+        assert row["expires_at"] == pytest.approx(action.created_at + store.ttl_seconds)
+
 
 class TestRejectEndpoint:
     def test_reject_marks_terminal_state(self, test_app, actions_env):
