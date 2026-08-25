@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     # OpenRouter 配置（OpenAI 兼容模式）
     openrouter_api_key: str = ""  # 默认空字符串，实际使用需从环境变量 OPENROUTER_API_KEY 加载
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    openrouter_model: str = "nvidia/nemotron-3.5-lightning"
+    openrouter_model: str = "nvidia/nemotron-3.5-lightning:free"
 
     # Milvus 配置
     milvus_host: str = "localhost"
@@ -57,7 +57,7 @@ class Settings(BaseSettings):
 
     # RAG 配置
     rag_top_k: int = 3
-    rag_model: str = "nvidia/nemotron-3.5-lightning"  # 对话/规划主模型（OpenRouter slug）
+    rag_model: str = "nvidia/nemotron-3.5-lightning:free"  # 对话/规划主模型（OpenRouter slug，免费档）
 
     # 本地向量化配置（sentence-transformers）
     embedding_model: str = "BAAI/bge-large-zh-v1.5"  # 中文优化，1024 维，与原 Milvus schema 兼容

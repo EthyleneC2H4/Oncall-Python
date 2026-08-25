@@ -188,7 +188,7 @@ Only `OPENROUTER_API_KEY` is required. Useful options (see `.env.example` / `app
 
 ```bash
 OPENROUTER_API_KEY=sk-or-v1-...                        # required
-RAG_MODEL=nvidia/nemotron-3.5-lightning                # strong tier
+RAG_MODEL=nvidia/nemotron-3.5-lightning:free           # strong tier (free)
 LLM_BACKUP_MODEL=nvidia/nemotron-3-nano-30b-a3b:free   # weak tier + fallback
 EMBEDDING_MODEL=BAAI/bge-large-zh-v1.5                 # local embeddings (1024-d)
 RERANK_ENABLED=true                                    # local cross-encoder rerank

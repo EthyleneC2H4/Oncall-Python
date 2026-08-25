@@ -188,7 +188,7 @@ curl -N http://localhost:9900/api/chat_stream \
 
 ```bash
 OPENROUTER_API_KEY=sk-or-v1-...                        # 必填
-RAG_MODEL=nvidia/nemotron-3.5-lightning                # 强档模型
+RAG_MODEL=nvidia/nemotron-3.5-lightning:free           # 强档模型（免费档）
 LLM_BACKUP_MODEL=nvidia/nemotron-3-nano-30b-a3b:free   # 弱档 + 兜底
 EMBEDDING_MODEL=BAAI/bge-large-zh-v1.5                 # 本地向量（1024 维）
 RERANK_ENABLED=true                                    # 本地交叉编码器重排
