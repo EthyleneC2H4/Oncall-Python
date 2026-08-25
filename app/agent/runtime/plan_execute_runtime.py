@@ -22,6 +22,7 @@ from loguru import logger
 from app.agent.aiops import PlanExecuteState, executor, planner, replanner
 from app.agent.runtime.base import AgentRuntime, default_registry
 from app.agent.runtime.events import AgentEvent, AgentEventEmitter, EventType
+from app.agent.runtime.session_mutex import session_mutex
 from app.config import config
 from app.services.session_store import SessionStore
 
@@ -148,6 +149,8 @@ class PlanExecuteRuntime(AgentRuntime):
     def __init__(self, checkpointer: MemorySaver | None = None):
         """初始化服务"""
         self.checkpointer = checkpointer or MemorySaver()
+        # 会话互斥：同 session 并发 run 串行化（见 session_mutex 模块文档）
+        self._session_locks: dict[str, asyncio.Lock] = {}
         self.graph = self._build_graph()
         default_registry.register(self)
         logger.info("PlanExecuteRuntime 初始化完成")
@@ -201,10 +204,17 @@ class PlanExecuteRuntime(AgentRuntime):
         与旧实现的本质区别：astream 每产出一个节点增量就立刻 yield，
         而不是等整个工作流跑完再补发。
         """
-        emitter = AgentEventEmitter(session_id=session_id)
-
         logger.info(f"[会话 {session_id}] 开始执行任务: {task}")
 
+        # 会话互斥：第二次并发 run 的 delete_thread 会清掉第一次的在途
+        # 追加通道状态，产出空回答却标记完成——必须串行化
+        async with session_mutex(self._session_locks, session_id):
+            async for event in self._run_locked(task, session_id):
+                yield event
+
+    async def _run_locked(self, task: str, session_id: str) -> AsyncIterator[AgentEvent]:
+        """互斥区内执行（原 run 体）"""
+        emitter = AgentEventEmitter(session_id=session_id)
         try:
             # 跨运行残留清理：past_steps/diagnosis_events/error_context 是
             # operator.add 追加通道，检查点若残留上一任务的增量，会被

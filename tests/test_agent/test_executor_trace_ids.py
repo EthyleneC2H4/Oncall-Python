@@ -68,10 +68,12 @@ class TestTraceIdThreading:
         assert captured["ids"] == ("", "")
 
     async def test_runtime_injects_session_into_initial_state(self):
-        """runtime 层注入：initial_state 携带 session_id"""
+        """runtime 层注入：initial_state 携带 session_id（注入逻辑在互斥区 _run_locked）"""
         import inspect
 
         from app.agent.runtime.plan_execute_runtime import PlanExecuteRuntime
 
-        source = inspect.getsource(PlanExecuteRuntime.run)
+        source = inspect.getsource(PlanExecuteRuntime.run) + inspect.getsource(
+            PlanExecuteRuntime._run_locked
+        )
         assert '"session_id": session_id' in source

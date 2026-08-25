@@ -149,6 +149,7 @@ def runtime_with_fast_timeout(monkeypatch):
         rt = PlanExecuteRuntime.__new__(PlanExecuteRuntime)  # 跳过真实图构建
         rt.checkpointer = None
         rt.graph = graph
+        rt._session_locks = {}  # 会话互斥锁表（__new__ 绕过了 __init__）
         return rt
 
     return _make
@@ -242,6 +243,7 @@ class TestWorkflowTimeout:
         rt = PlanExecuteRuntime.__new__(PlanExecuteRuntime)
         rt.checkpointer = None
         rt.graph = SlowGraph()
+        rt._session_locks = {}  # 会话互斥锁表（__new__ 绕过了 __init__）
 
         events = [e async for e in rt.run("慢任务", session_id="timeout-test")]
 
@@ -270,6 +272,7 @@ class TestWorkflowTimeout:
         rt = PlanExecuteRuntime.__new__(PlanExecuteRuntime)
         rt.checkpointer = None
         rt.graph = ExplodingGraph([])
+        rt._session_locks = {}  # 会话互斥锁表（__new__ 绕过了 __init__）
 
         events = [e async for e in rt.run("任务", session_id="err-test")]
 

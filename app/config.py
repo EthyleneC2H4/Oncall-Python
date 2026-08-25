@@ -110,6 +110,11 @@ class Settings(BaseSettings):
     context_token_budget: int = 6000  # 注入 LLM 的上下文总预算（近似估算）
     context_history_budget: int = 2400  # ReAct 对话历史 token 预算（替换旧硬编码条数截断）
 
+    # 会话检查点内存上限：MemorySaver 为支持时间旅行保留每个 superstep 的
+    # 完整快照且无淘汰，长开服务随 会话数×轮数 无界增长（RSS 只升不降）。
+    # 超过上限时整体删除最久未活跃线程的检查点（LRU）。
+    checkpoint_max_threads: int = Field(default=200, ge=10)
+
     @property
     def mcp_servers(self) -> dict[str, dict[str, Any]]:
         """获取完整的 MCP 服务器配置"""

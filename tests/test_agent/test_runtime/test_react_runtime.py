@@ -1,10 +1,15 @@
 """ReActRuntime 测试
 
 覆盖：双通道（messages/updates）→ TOKEN / TOOL_START / TOOL_END / COMPLETE
-事件映射、tool_call id 回填、异常 → ERROR 事件、会话快照/清空。
+事件映射、tool_call id 回填、异常 → ERROR 事件、会话快照/清空、
+工作流超时部分回答、检查点 LRU 淘汰、并发首请求单次初始化。
 """
 
+import asyncio
+import time
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
@@ -289,3 +294,141 @@ class TestEnsureReady:
 
         assert calls == [False]  # 只装载一次
         assert len(captured["tools"]) == 5  # 默认四件套 + 1 个 MCP 工具
+
+    @pytest.mark.asyncio
+    async def test_concurrent_first_requests_initialize_once(self, monkeypatch):
+        """并发首请求：锁内二次检查，MCP 拉取与图编译各只发生一次"""
+        mcp_calls: list[bool] = []
+        builds = {"count": 0}
+
+        async def fake_get_mcp_tools(ttl_seconds=30.0, *, refresh=False):
+            await asyncio.sleep(0.01)  # 放大竞态窗口
+            mcp_calls.append(True)
+            return [object()]
+
+        def fake_create_agent(model, tools, checkpointer=None, **kwargs):
+            builds["count"] += 1
+            return object()
+
+        monkeypatch.setattr("app.agent.runtime.react_runtime.get_mcp_tools", fake_get_mcp_tools)
+        monkeypatch.setattr("app.agent.runtime.react_runtime.create_agent", fake_create_agent)
+        monkeypatch.setattr(
+            "app.agent.runtime.react_runtime.LLMFactory",
+            type(
+                "F",
+                (),
+                {
+                    "create_chat_model": staticmethod(
+                        lambda model=None, temperature=0.7, streaming=True: object()
+                    )
+                },
+            ),
+        )
+
+        rt = ReActRuntime(system_prompt="p")
+        await asyncio.gather(rt.ensure_ready(), rt.ensure_ready(), rt.ensure_ready())
+
+        assert len(mcp_calls) == 1
+        assert builds["count"] == 1
+        assert rt._initialized is True
+
+
+class TestWorkflowTimeout:
+    @pytest.mark.asyncio
+    async def test_timeout_yields_partial_answer_complete(self, monkeypatch):
+        """整体 deadline 超时 → 已产出的部分回答以 timed_out=True 的 COMPLETE 收尾"""
+
+        class HangingAgent:
+            @staticmethod
+            def astream(input=None, config=None, stream_mode=None):  # noqa: A002
+                async def _gen():
+                    yield (
+                        "messages",
+                        (AIMessageChunk([{"type": "text", "text": "部分回答"}]), {"langgraph_node": "agent"}),
+                    )
+                    while True:
+                        await asyncio.sleep(3600)  # 停滞：模拟 OpenRouter 挂死
+
+                return _gen()
+
+        # 先建实例（__init__ 读真实 config.rag_model），再注入短超时配置
+        rt = make_runtime([])
+        rt.agent = HangingAgent()
+        monkeypatch.setattr(
+            "app.agent.runtime.react_runtime.config",
+            SimpleNamespace(workflow_timeout_seconds=0.05, checkpoint_max_threads=50),
+        )
+
+        events = [e async for e in rt.run("慢任务", session_id="timeout-test")]
+
+        types = [e.type for e in events]
+        assert EventType.TOKEN in types  # 部分回答已先行流出
+        assert types[-1] is EventType.COMPLETE  # 终止事件是 COMPLETE 不是 ERROR
+        payload = events[-1].payload
+        assert payload["timed_out"] is True
+        assert "部分回答" in payload["answer"]
+        assert "超时" in payload["message"]
+
+        # 清理：HangingAgent 的 sleep 循环随超时取消，无需额外处理
+
+
+class TestCheckpointLru:
+    def _make_lru_runtime(self) -> ReActRuntime:
+        rt = ReActRuntime.__new__(ReActRuntime)  # 只需 LRU 相关属性
+        rt.checkpointer = MagicMock()
+        rt._thread_last_access = {}
+        return rt
+
+    def _patch_config(self, monkeypatch, max_threads: int) -> None:
+        monkeypatch.setattr(
+            "app.agent.runtime.react_runtime.config",
+            SimpleNamespace(checkpoint_max_threads=max_threads, workflow_timeout_seconds=30),
+        )
+
+    def test_no_eviction_under_limit(self, monkeypatch):
+        self._patch_config(monkeypatch, max_threads=3)
+        rt = self._make_lru_runtime()
+
+        for tid in ("a", "b"):
+            rt._touch_thread(tid)
+
+        assert set(rt._thread_last_access) == {"a", "b"}
+        rt.checkpointer.delete_thread.assert_not_called()
+
+    def test_oldest_thread_evicted_over_limit(self, monkeypatch):
+        self._patch_config(monkeypatch, max_threads=2)
+        rt = self._make_lru_runtime()
+
+        rt._touch_thread("a")
+        time.sleep(0.005)
+        rt._touch_thread("b")
+        time.sleep(0.005)
+        rt._touch_thread("c")  # 超 2：淘汰最久未活跃的 a
+
+        assert set(rt._thread_last_access) == {"b", "c"}
+        rt.checkpointer.delete_thread.assert_called_once_with("a")
+
+    def test_recently_revisited_thread_survives(self, monkeypatch):
+        self._patch_config(monkeypatch, max_threads=2)
+        rt = self._make_lru_runtime()
+
+        rt._touch_thread("a")
+        time.sleep(0.005)
+        rt._touch_thread("b")
+        time.sleep(0.005)
+        rt._touch_thread("a")  # a 重获活跃 → b 成为最久未活跃
+        time.sleep(0.005)
+        rt._touch_thread("c")
+
+        assert set(rt._thread_last_access) == {"a", "c"}
+        rt.checkpointer.delete_thread.assert_called_once_with("b")
+
+    def test_eviction_failure_swallowed(self, monkeypatch):
+        self._patch_config(monkeypatch, max_threads=1)
+        rt = self._make_lru_runtime()
+        rt.checkpointer.delete_thread.side_effect = RuntimeError("delete 失败")
+
+        rt._touch_thread("a")
+        rt._touch_thread("b")  # 淘汰失败不影响主流程
+
+        assert set(rt._thread_last_access) == {"b"}

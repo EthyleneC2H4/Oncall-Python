@@ -106,9 +106,7 @@ class RequestGuardMiddleware(BaseHTTPMiddleware):
                     content=body,
                     status_code=response.status_code,
                     headers={
-                        k: v
-                        for k, v in response.headers.items()
-                        if k.lower() != "content-length"
+                        k: v for k, v in response.headers.items() if k.lower() != "content-length"
                     },
                 )
                 _idempotency_cache.set(idem_key, response)

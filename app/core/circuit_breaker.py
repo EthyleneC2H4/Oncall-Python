@@ -118,10 +118,16 @@ _registry_lock = threading.Lock()
 
 
 def get_breaker(name: str) -> CircuitBreaker:
-    """获取或创建指定服务的熔断器"""
+    """获取或创建指定服务的熔断器（阈值/冷却从配置读取）"""
     with _registry_lock:
         if name not in _breakers:
-            _breakers[name] = CircuitBreaker(name)
+            from app.config import config  # 局部导入避免 import 环
+
+            _breakers[name] = CircuitBreaker(
+                name,
+                failure_threshold=config.circuit_failure_threshold,
+                cooldown_seconds=config.circuit_cooldown_seconds,
+            )
         return _breakers[name]
 
 

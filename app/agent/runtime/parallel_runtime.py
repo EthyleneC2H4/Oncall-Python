@@ -155,6 +155,13 @@ class ParallelRuntime(AgentRuntime):
             )
             logger.info(f"=== 多 Agent 并行诊断完成，耗时 {total_ms:.0f}ms ===")
 
+        except Exception as e:
+            # 基类契约：异常以 ERROR 事件收尾。synthesize 抛出时 STEP_END 已发出、
+            # 消费方在等终止事件——裸异常穿出生成器会让它永远收不到收尾
+            # （worker 由 _run_agent_safe 兜底不会抛，这里是唯一的逃逸口）。
+            logger.error(f"=== 多 Agent 综合失败: {e} ===", exc_info=True)
+            yield emitter.emit(EventType.ERROR, message=f"多 Agent 综合失败: {e}")
+
         finally:
             # 消费方提前断开时回收仍在执行的 worker
             for t in worker_tasks:

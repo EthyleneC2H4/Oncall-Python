@@ -65,8 +65,11 @@ def retrieve_knowledge(query: str) -> tuple[str, list[Document]]:
             logger.warning("未检索到相关文档")
             return "没有找到相关信息。", []
 
-        # Self-RAG: 基于分数过滤不相关文档
-        relevance_threshold = 800.0  # L2 距离阈值
+        # Self-RAG: 基于分数过滤不相关文档。
+        # embedding 归一化 + Milvus L2 度量下单位向量平方距离 ∈ [0,4]，
+        # 换算 cos = 1 − L2²/2：阈值 1.2 ≈ cos 0.28。
+        # （旧值 800 在此量纲下恒真，过滤是死逻辑——审计发现）
+        relevance_threshold = 1.2
         filtered_docs = _filter_by_relevance(docs_with_scores, relevance_threshold)
 
         # 限制最终返回数量

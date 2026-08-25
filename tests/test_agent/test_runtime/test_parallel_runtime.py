@@ -152,3 +152,25 @@ async def test_run_parallel_diagnosis_aggregates_result():
     assert result.agents_failed == 0
     assert "综合报告" in result.synthesized_report
     assert result.degradation_level == "none"
+
+
+class ExplodingSynthesizer:
+    async def synthesize(self, alert_input: str, findings: list) -> str:
+        raise RuntimeError("综合模型不可用")
+
+
+class TestSynthesizerFailure:
+    @pytest.mark.asyncio
+    async def test_synthesize_error_yields_error_terminal(self):
+        """综合阶段抛异常 → 以 ERROR 终止事件收尾（基类契约），不裸穿生成器"""
+        agents = [FakeAgent("log_analyst"), FakeAgent("metric_inspector")]
+        rt = ParallelRuntime(agents=agents, synthesizer=ExplodingSynthesizer())
+
+        events = [e async for e in rt.run("CPU 告警", session_id="p-err")]
+        types = [e.type for e in events]
+
+        assert EventType.STEP_END in types  # worker 结果已正常产出
+        assert types[-1] is EventType.ERROR  # 消费方必须收到终止事件
+        assert EventType.REPORT not in types
+        assert EventType.COMPLETE not in types
+        assert "多 Agent 综合失败" in events[-1].payload["message"]

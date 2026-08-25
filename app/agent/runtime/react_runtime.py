@@ -11,6 +11,7 @@
 """
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -23,6 +24,7 @@ from app.agent.mcp_client import get_mcp_tools
 from app.agent.runtime.base import AgentRuntime, default_registry
 from app.agent.runtime.events import AgentEvent, AgentEventEmitter, EventType
 from app.agent.runtime.middleware import TokenTrimMiddleware
+from app.agent.runtime.session_mutex import session_mutex
 from app.config import config
 from app.core.llm_factory import LLMFactory
 from app.services.session_store import SessionStore
@@ -80,6 +82,13 @@ class ReActRuntime(AgentRuntime):
 
         # 会话检查点（MemorySaver）；会话读写视图见 _store 属性
         self.checkpointer = MemorySaver()
+        # 检查点 LRU：thread → 最近活跃时间，超 checkpoint_max_threads 整体淘汰
+        self._thread_last_access: dict[str, float] = {}
+
+        # 会话互斥：同 session 并发 run 串行化，防检查点交错写入/串话
+        self._session_locks: dict[str, asyncio.Lock] = {}
+        # 基线初始化锁：并发首请求只拉一次 MCP 工具、只编译一次图
+        self._init_lock = asyncio.Lock()
 
         self.agent: Any = None
         self._initialized = False
@@ -88,38 +97,47 @@ class ReActRuntime(AgentRuntime):
         logger.info(f"ReActRuntime 初始化完成, model={self.model_name}, streaming={streaming}")
 
     async def ensure_ready(self) -> None:
-        """异步初始化 Agent（包括 MCP 工具；幂等）"""
+        """异步初始化 Agent（包括 MCP 工具；幂等 + 并发安全）
+
+        锁内二次检查：并发首请求窗内只拉一次 MCP 工具、编译一次图——
+        无锁的 check-then-act 会双重编译并竞写 self.agent/self.mcp_tools。
+        """
         if self._initialized:
             return
+        async with self._init_lock:
+            if self._initialized:
+                return
 
-        # MCP 工具列表带短 TTL 缓存（见 mcp_client.get_mcp_tools）
-        self.mcp_tools = await get_mcp_tools()
-        logger.info(f"成功加载 {len(self.mcp_tools)} 个 MCP 工具")
+            # MCP 工具列表带短 TTL 缓存（见 mcp_client.get_mcp_tools）
+            self.mcp_tools = await get_mcp_tools()
+            logger.info(f"成功加载 {len(self.mcp_tools)} 个 MCP 工具")
 
-        all_tools = self.tools + self.mcp_tools
+            all_tools = self.tools + self.mcp_tools
 
-        model = LLMFactory.create_chat_model(
-            model=self.model_name,
-            temperature=self.temperature,
-            streaming=self.streaming,
-        )
+            model = LLMFactory.create_chat_model(
+                model=self.model_name,
+                temperature=self.temperature,
+                streaming=self.streaming,
+            )
 
-        # P2 修复：system_prompt 由 create_agent 在推理时统一注入（不落线程状态）。
-        # 旧实现把 SystemMessage 塞进输入消息列表，会随轮次累积进检查点；
-        # 且「最旧优先」的 token 裁剪会先砍掉携带最新记忆块的那条系统消息。
-        agent_kwargs: dict[str, Any] = {
-            "checkpointer": self.checkpointer,
-            # P2: 按 token 预算裁剪历史（替换旧硬编码条数截断）
-            "middleware": [TokenTrimMiddleware(max_tokens=config.context_history_budget)],
-        }
-        if self.system_prompt:
-            agent_kwargs["system_prompt"] = self.system_prompt
-        self.agent = create_agent(model, tools=all_tools, **agent_kwargs)
-        self._initialized = True
+            # P2 修复：system_prompt 由 create_agent 在推理时统一注入（不落线程状态）。
+            # 旧实现把 SystemMessage 塞进输入消息列表，会随轮次累积进检查点；
+            # 且「最旧优先」的 token 裁剪会先砍掉携带最新记忆块的那条系统消息。
+            agent_kwargs: dict[str, Any] = {
+                "checkpointer": self.checkpointer,
+                # P2: 按 token 预算裁剪历史（替换旧硬编码条数截断）
+                "middleware": [TokenTrimMiddleware(max_tokens=config.context_history_budget)],
+            }
+            if self.system_prompt:
+                agent_kwargs["system_prompt"] = self.system_prompt
+            self.agent = create_agent(model, tools=all_tools, **agent_kwargs)
+            self._initialized = True
 
-        if all_tools:
-            tool_names = [tool.name if hasattr(tool, "name") else str(tool) for tool in all_tools]
-            logger.info(f"可用工具列表: {', '.join(tool_names)}")
+            if all_tools:
+                tool_names = [
+                    tool.name if hasattr(tool, "name") else str(tool) for tool in all_tools
+                ]
+                logger.info(f"可用工具列表: {', '.join(tool_names)}")
 
     async def _agent_for_variant(self, prompt_variant: str | None) -> tuple[Any, str]:
         """按变体取编译图，返回 (编译图, 实际生效的变体名)
@@ -248,81 +266,130 @@ class ReActRuntime(AgentRuntime):
         """
         emitter = AgentEventEmitter(session_id=session_id)
 
-        try:
-            agent, used_variant = await self._agent_for_variant(prompt_variant)
-            assert agent is not None, "Agent 未初始化"
+        # 声明提前到 try 外：超时分支需要读取已收集的部分回答
+        answer_parts: list[str] = []
+        tool_event_count = 0
 
-            # AB 归因单一事实源（评审修复）：按实际生效的图记录，
-            # 请求了但回退基线的情况计入 base 分组
+        # 会话互斥：同 session 并发 run 串行化，防检查点交错写入/串话
+        async with session_mutex(self._session_locks, session_id):
             try:
-                from app.core.cost_tracker import cost_tracker
+                agent, used_variant = await self._agent_for_variant(prompt_variant)
+                assert agent is not None, "Agent 未初始化"
 
-                cost_tracker.mark_prompt_variant(used_variant, session_id=session_id)
-            except Exception as e:  # noqa: BLE001 - 归因失败不影响主流程
-                logger.debug(f"Prompt 变体归因记录失败: {e}")
+                # AB 归因单一事实源（评审修复）：按实际生效的图记录，
+                # 请求了但回退基线的情况计入 base 分组
+                try:
+                    from app.core.cost_tracker import cost_tracker
 
-            logger.info(
-                f"[会话 {session_id}] ReActRuntime 收到任务: {task}"
-                + (f" (variant={prompt_variant})" if prompt_variant else "")
-            )
+                    cost_tracker.mark_prompt_variant(used_variant, session_id=session_id)
+                except Exception as e:  # noqa: BLE001 - 归因失败不影响主流程
+                    logger.debug(f"Prompt 变体归因记录失败: {e}")
 
-            # P2: 轮前召回长期记忆注入 system prompt 尾部（经验复用闭环）
-            memory_block = await self._recall_memory(task)
-            agent_input = self._build_input(task, memory_block=memory_block)
-            if memory_block:
-                logger.info(f"[会话 {session_id}] 注入记忆召回块 ({len(memory_block)} 字符)")
+                logger.info(
+                    f"[会话 {session_id}] ReActRuntime 收到任务: {task}"
+                    + (f" (variant={prompt_variant})" if prompt_variant else "")
+                )
 
-            run_config = {"configurable": {"thread_id": session_id}}
+                # 检查点 LRU 触发点：本轮线程记为活跃，超上限淘汰最久未活跃线程
+                self._touch_thread(session_id)
 
-            answer_parts: list[str] = []
-            tool_event_count = 0
-            # tool_call id → {"name","args"}，用于 TOOL_END 时回填工具名
-            pending_calls: dict[str, dict[str, Any]] = {}
+                # P2: 轮前召回长期记忆注入 system prompt 尾部（经验复用闭环）
+                memory_block = await self._recall_memory(task)
+                agent_input = self._build_input(task, memory_block=memory_block)
+                if memory_block:
+                    logger.info(f"[会话 {session_id}] 注入记忆召回块 ({len(memory_block)} 字符)")
 
-            async for mode, chunk in agent.astream(
-                input=agent_input,
-                config=run_config,
-                stream_mode=["messages", "updates"],
-            ):
-                if mode == "messages":
-                    # (消息块, 元数据)：AIMessageChunk 的文本块即 token
-                    token, metadata = chunk
-                    node_name = (
-                        metadata.get("langgraph_node", "unknown")
-                        if isinstance(metadata, dict)
-                        else "unknown"
-                    )
-                    if type(token).__name__ not in _TOKEN_MESSAGE_TYPES:
-                        continue
-                    for event in self._emit_token_events(token, node_name, emitter):
-                        answer_parts.append(str(event.payload.get("text", "")))
-                        yield event
-                else:
-                    # updates：{node_name: state_delta}
-                    new_events = self._emit_update_events(chunk, emitter, pending_calls)
-                    tool_event_count += sum(1 for e in new_events if e.type is EventType.TOOL_START)
-                    for event in new_events:
-                        yield event
+                run_config = {"configurable": {"thread_id": session_id}}
 
-            final_answer = "".join(answer_parts)
-            # P2: 轮后写入情景记忆（下次同类问题可被召回）
-            await self._remember_turn(task, final_answer, tool_event_count, session_id)
+                # tool_call id → {"name","args"}，用于 TOOL_END 时回填工具名
+                pending_calls: dict[str, dict[str, Any]] = {}
 
-            logger.info(f"[会话 {session_id}] ReActRuntime 任务完成")
-            # 变体生效时随 COMPLETE 下发实际变体名（SSE 只增不改：
-            # 基线运行不携带该字段，消费方按缺省处理）
-            complete_kwargs: dict[str, Any] = (
-                {"prompt_variant": used_variant} if used_variant else {}
-            )
-            yield emitter.emit(
-                EventType.COMPLETE, message="查询完成", answer=final_answer, **complete_kwargs
-            )
+                # 工作流整体 deadline：三个运行时唯独此前的主聊天路径没有，
+                # OpenRouter 停滞时 SSE 流永久挂起还占着并发槽（与 plan_execute 对齐）
+                async with asyncio.timeout(config.workflow_timeout_seconds):
+                    async for mode, chunk in agent.astream(
+                        input=agent_input,
+                        config=run_config,
+                        stream_mode=["messages", "updates"],
+                    ):
+                        if mode == "messages":
+                            # (消息块, 元数据)：AIMessageChunk 的文本块即 token
+                            token, metadata = chunk
+                            node_name = (
+                                metadata.get("langgraph_node", "unknown")
+                                if isinstance(metadata, dict)
+                                else "unknown"
+                            )
+                            if type(token).__name__ not in _TOKEN_MESSAGE_TYPES:
+                                continue
+                            for event in self._emit_token_events(token, node_name, emitter):
+                                answer_parts.append(str(event.payload.get("text", "")))
+                                yield event
+                        else:
+                            # updates：{node_name: state_delta}
+                            new_events = self._emit_update_events(chunk, emitter, pending_calls)
+                            tool_event_count += sum(
+                                1 for e in new_events if e.type is EventType.TOOL_START
+                            )
+                            for event in new_events:
+                                yield event
 
-        except Exception as e:
-            # ERROR 即终止事件：流正常收尾，不再向消费方抛异常
-            # （非流式门面如需异常语义，自行根据 ERROR 事件转换）
-            logger.error(f"[会话 {session_id}] ReActRuntime 任务失败: {e}", exc_info=True)
-            yield emitter.emit(EventType.ERROR, message=str(e))
+                final_answer = "".join(answer_parts)
+                # P2: 轮后写入情景记忆（下次同类问题可被召回）
+                await self._remember_turn(task, final_answer, tool_event_count, session_id)
+
+                logger.info(f"[会话 {session_id}] ReActRuntime 任务完成")
+                # 变体生效时随 COMPLETE 下发实际变体名（SSE 只增不改：
+                # 基线运行不携带该字段，消费方按缺省处理）
+                complete_kwargs: dict[str, Any] = (
+                    {"prompt_variant": used_variant} if used_variant else {}
+                )
+                yield emitter.emit(
+                    EventType.COMPLETE,
+                    message="查询完成",
+                    answer=final_answer,
+                    **complete_kwargs,
+                )
+
+            except TimeoutError:
+                # 超时优雅截断：已产出的部分回答照常下发（与 plan_execute 的
+                # 部分报告哲学一致），前端能正常收尾而不是等一个 ERROR
+                partial_answer = "".join(answer_parts)
+                logger.warning(
+                    f"[会话 {session_id}] 工作流超时 "
+                    f"({config.workflow_timeout_seconds}s)，返回部分回答"
+                )
+                yield emitter.emit(
+                    EventType.COMPLETE,
+                    message="已达到工作流超时上限，返回部分回答",
+                    answer=partial_answer,
+                    timed_out=True,
+                )
+            except Exception as e:
+                # ERROR 即终止事件：流正常收尾，不再向消费方抛异常
+                # （非流式门面如需异常语义，自行根据 ERROR 事件转换）
+                logger.error(f"[会话 {session_id}] ReActRuntime 任务失败: {e}", exc_info=True)
+                yield emitter.emit(EventType.ERROR, message=str(e))
+
+    def _touch_thread(self, thread_id: str) -> None:
+        """记录会话活跃时间，超上限时整体淘汰最久未活跃线程（LRU）
+
+        MemorySaver 为支持时间旅行保留每个 superstep 的完整快照且无任何
+        淘汰逻辑：长开服务随 会话数×轮数 无界增长，进程 RSS 只升不降
+        （session_id 外部可控，压测/爬虫可放大）。当前线程刚被触碰必然是
+        最新，淘汰永远不会误删在途会话。
+        """
+        self._thread_last_access[thread_id] = time.monotonic()
+        if len(self._thread_last_access) <= config.checkpoint_max_threads:
+            return
+
+        oldest = min(self._thread_last_access, key=lambda tid: self._thread_last_access[tid])
+        self._thread_last_access.pop(oldest, None)
+        try:
+            self.checkpointer.delete_thread(oldest)
+            logger.info(f"检查点 LRU 淘汰最久未活跃线程: {oldest}")
+        except Exception as e:  # noqa: BLE001 - 淘汰失败不影响主流程
+            logger.debug(f"检查点淘汰失败（忽略）: {e}")
 
     @staticmethod
     def _emit_token_events(
