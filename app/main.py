@@ -82,6 +82,15 @@ async def lifespan(app: FastAPI):
         logger.warning(f"⚠️ 长期记忆服务启动失败，将以无记忆模式运行: {e}")
         health_registry.mark_down("memory")
 
+    # 定时记忆巩固 worker：随记忆功能启停（周期开关 disabled 或记忆总开关
+    # 关闭时不建任务；启动失败非致命——巩固缺失只影响经验沉淀速度）
+    try:
+        from app.services.memory.consolidation_worker import consolidation_worker
+
+        consolidation_worker.start()
+    except Exception as e:
+        logger.warning(f"⚠️ 记忆巩固 worker 启动失败: {e}")
+
     # 启动后台健康探针
     await health_registry.start_probes(interval=config.health_probe_interval)
 
@@ -91,6 +100,12 @@ async def lifespan(app: FastAPI):
 
     # 关闭时执行
     await health_registry.stop_probes()
+    try:
+        from app.services.memory.consolidation_worker import consolidation_worker
+
+        await consolidation_worker.stop()
+    except Exception as e:
+        logger.warning(f"⚠️ 记忆巩固 worker 停止异常: {e}")
     try:
         from app.services.memory import memory_service
 

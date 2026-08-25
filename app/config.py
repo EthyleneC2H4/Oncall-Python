@@ -105,6 +105,9 @@ class Settings(BaseSettings):
     memory_consolidate_threshold: float = Field(
         default=0.85, ge=0.0, le=1.0
     )  # 情景→语义巩固的余弦相似度阈值
+    # C3 定时巩固 worker：开关只管周期循环；手动端点不受此限制（显式意图）
+    memory_consolidate_enabled: bool = True
+    memory_consolidate_interval_seconds: int = Field(default=3600, ge=60)  # 巩固周期（秒）
 
     # 上下文引擎配置（P2）
     context_token_budget: int = 6000  # 注入 LLM 的上下文总预算（近似估算）

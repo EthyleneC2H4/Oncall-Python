@@ -65,3 +65,19 @@ async def delete_user_memory(user_id: str):
     except Exception as e:
         logger.error(f"清除用户记忆失败: {e}")
         raise HTTPException(status_code=500, detail=f"清除用户记忆失败: {e}") from e
+
+
+@router.post("/memory/consolidate")
+async def trigger_memory_consolidation():
+    """手动触发一次情景→语义记忆巩固（与周期 worker 共用同一入口）
+
+    Returns:
+        巩固统计：{"clusters", "members_consolidated", "semantic_ids"}
+    """
+    from app.services.memory.consolidation_worker import consolidation_worker
+
+    stats = await consolidation_worker.run_once()
+    if stats is None:  # 记忆服务未就绪（总开关关闭/建库失败）
+        raise HTTPException(status_code=409, detail="长期记忆未启用，无法执行巩固")
+    logger.info(f"Memory API: 手动触发记忆巩固 {stats}")
+    return {"code": 200, "data": stats}
