@@ -57,7 +57,9 @@ class Settings(BaseSettings):
 
     # RAG 配置
     rag_top_k: int = 3
-    rag_model: str = "nvidia/nemotron-3.5-lightning:free"  # 对话/规划主模型（OpenRouter slug，免费档）
+    rag_model: str = (
+        "nvidia/nemotron-3.5-lightning:free"  # 对话/规划主模型（OpenRouter slug，免费档）
+    )
 
     # 本地向量化配置（sentence-transformers）
     embedding_model: str = "BAAI/bge-large-zh-v1.5"  # 中文优化，1024 维，与原 Milvus schema 兼容
