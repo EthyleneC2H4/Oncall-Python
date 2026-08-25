@@ -109,6 +109,10 @@ class Settings(BaseSettings):
     memory_consolidate_enabled: bool = True
     memory_consolidate_interval_seconds: int = Field(default=3600, ge=60)  # 巩固周期（秒）
 
+    # C2 告警 webhook：可选共享密钥（留空不校验）+ 指纹去重窗口（秒）
+    alert_webhook_token: str = ""
+    alert_webhook_dedup_window_seconds: int = Field(default=300, ge=0)
+
     # 上下文引擎配置（P2）
     context_token_budget: int = 6000  # 注入 LLM 的上下文总预算（近似估算）
     context_history_budget: int = 2400  # ReAct 对话历史 token 预算（替换旧硬编码条数截断）

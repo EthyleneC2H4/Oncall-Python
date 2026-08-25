@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
-from app.api import aiops, chat, feedback, file, health, kg, memory, multi_diag
+from app.api import aiops, alerts, chat, feedback, file, health, kg, memory, multi_diag
 from app.config import config
 from app.core.circuit_breaker import BREAKER_MILVUS, get_breaker
 from app.core.health_registry import health_registry
@@ -160,6 +160,7 @@ app.include_router(kg.router, prefix="/api", tags=["知识图谱"])
 app.include_router(multi_diag.router, prefix="/api", tags=["多Agent诊断"])
 app.include_router(feedback.router, prefix="/api", tags=["反馈与评测"])
 app.include_router(memory.router, prefix="/api", tags=["长期记忆"])
+app.include_router(alerts.router, prefix="/api", tags=["告警接入"])
 
 # 挂载静态文件
 static_dir = "static"
